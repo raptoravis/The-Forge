@@ -1,4 +1,4 @@
-/*
+﻿/*
 * Copyright (c) 2018-2019 Confetti Interactive Inc.
 *
 * This file is part of The-Forge

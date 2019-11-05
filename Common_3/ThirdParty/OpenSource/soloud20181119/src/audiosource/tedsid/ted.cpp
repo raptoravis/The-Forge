@@ -1,4 +1,4 @@
-#include <string.h>
+ï»¿#include <string.h>
 #include "ted.h"
 #include "../../../../../../OS/Interfaces/IMemory.h"
 
@@ -176,7 +176,7 @@ inline unsigned int TED::getWaveSample(unsigned int channel, unsigned int wave)
 			return waveTriangle(channel);
 			break;
 
-		// combined waveforms á la SID
+		// combined waveforms ?la SID
 		case 3: // square + sawtooth
 			sm = waveSawTooth(channel) + waveSquare(channel);
 			return sm /= 2;
