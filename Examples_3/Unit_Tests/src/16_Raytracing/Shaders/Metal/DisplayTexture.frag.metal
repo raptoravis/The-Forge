@@ -32,12 +32,19 @@ struct PsIn {
 
 struct FSData {
     texture2d<float> uTex0;
+#if DENOISER_ENABLED
+    texture2d<float> albedoTex;
+#endif
     sampler uSampler0;
 };
 
 fragment float4 stageMain(PsIn In [[stage_in]],
-    constant FSData& fsData [[buffer(UPDATE_FREQ_NONE)]]
+    constant FSData& fsData [[buffer(UPDATE_FREQ_PER_FRAME)]]
 )
 {
-	return fsData.uTex0.sample(fsData.uSampler0, In.texCoord);
+	float4 result = fsData.uTex0.sample(fsData.uSampler0, In.texCoord);
+#if DENOISER_ENABLED
+	result.rgb *= fsData.albedoTex.sample(fsData.uSampler0, In.texCoord).rgb;
+#endif
+	return result;
 }
