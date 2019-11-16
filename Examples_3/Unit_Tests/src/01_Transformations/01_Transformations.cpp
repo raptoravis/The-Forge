@@ -154,6 +154,9 @@ public:
         
 		// window and renderer setup
 		RendererDesc settings = { 0 };
+
+		settings.mApi = RENDERER_API_VULKAN;
+
 		initRenderer(GetName(), &settings, &pRenderer);
 		//check for init success
 		if (!pRenderer)

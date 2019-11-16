@@ -58,3 +58,10 @@ Art/
 # Nuget packages
 Tools/ShaderBuildCommand/packages/
 **/ThirdParty/OpenSource/hlslparser/Ext/ShaderTranslator/packages/
+/Examples_3/Unit_Tests/src/01_Transformations/Shaders/D3D12/Binary
+
+
+*.ilk
+*.pdb
+
+
