@@ -38,11 +38,6 @@ struct ThreadedTask
 	uintptr_t mEnd;
 };
 
-enum
-{
-	MAX_LOAD_THREADS = 4
-};
-
 struct ThreadSystem
 {
 	ThreadDesc                 mThreadDescs[MAX_LOAD_THREADS];
@@ -54,6 +49,10 @@ struct ThreadSystem
 	uint32_t                   mNumLoaders;
 	uint32_t                   mNumIdleLoaders;
 	volatile bool              mRun;
+
+#if defined(NX64)
+	ThreadTypeNX			   mThreadType[MAX_LOAD_THREADS];
+#endif
 };
 
 bool assistThreadSystem(ThreadSystem* pThreadSystem)
@@ -112,12 +111,12 @@ static void taskThreadFunc(void* pThreadData)
 	pThreadSystem->mQueueMutex.Release();
 }
 
-void initThreadSystem(ThreadSystem** ppThreadSystem)
+void initThreadSystem(ThreadSystem** ppThreadSystem, uint32_t numRequestedThreads, int preferredCore, const char* threadName)
 {
 	ThreadSystem* pThreadSystem = conf_new(ThreadSystem);
 
 	uint32_t numThreads = max<uint32_t>(Thread::GetNumCPUCores() - 1, 1);
-	uint32_t numLoaders = min<uint32_t>(numThreads, MAX_LOAD_THREADS);
+	uint32_t numLoaders = min<uint32_t>(numThreads, min<uint32_t>(numRequestedThreads, MAX_LOAD_THREADS));
 
 	pThreadSystem->mQueueMutex.Init();
 	pThreadSystem->mQueueCond.Init();
@@ -131,6 +130,13 @@ void initThreadSystem(ThreadSystem** ppThreadSystem)
 		pThreadSystem->mThreadDescs[i].pFunc = taskThreadFunc;
 		pThreadSystem->mThreadDescs[i].pData = pThreadSystem;
 
+#if defined(NX64)
+		pThreadSystem->mThreadDescs[i].pThreadStack = aligned_alloc(THREAD_STACK_ALIGNMENT_NX, ALIGNED_THREAD_STACK_SIZE_NX);
+		pThreadSystem->mThreadDescs[i].hThread = &pThreadSystem->mThreadType[i];
+		pThreadSystem->mThreadDescs[i].preferredCore = preferredCore;
+		pThreadSystem->mThreadDescs[i].pThreadName = threadName;
+#endif
+
 		pThreadSystem->mThread[i] = create_thread(&pThreadSystem->mThreadDescs[i]);
 	}
 	pThreadSystem->mNumLoaders = numLoaders;
@@ -141,9 +147,14 @@ void initThreadSystem(ThreadSystem** ppThreadSystem)
 void addThreadSystemTask(ThreadSystem* pThreadSystem, TaskFunc task, void* user, uintptr_t index)
 {
 	pThreadSystem->mQueueMutex.Acquire();
-	pThreadSystem->mLoadQueue.emplace_back(ThreadedTask{ task, user, index, index+1 });
+	pThreadSystem->mLoadQueue.emplace_back(ThreadedTask{ task, user, index, index + 1 });
 	pThreadSystem->mQueueMutex.Release();
-	pThreadSystem->mQueueCond.WakeOne();
+	pThreadSystem->mQueueCond.WakeAll();
+}
+
+uint32_t getThreadSystemThreadCount(ThreadSystem* pThreadSystem)
+{
+	return pThreadSystem->mNumLoaders;
 }
 
 void addThreadSystemRangeTask(ThreadSystem* pThreadSystem, TaskFunc task, void* user, uintptr_t count)
@@ -151,7 +162,7 @@ void addThreadSystemRangeTask(ThreadSystem* pThreadSystem, TaskFunc task, void* 
 	pThreadSystem->mQueueMutex.Acquire();
 	pThreadSystem->mLoadQueue.emplace_back(ThreadedTask{ task, user, 0, count });
 	pThreadSystem->mQueueMutex.Release();
-	pThreadSystem->mQueueCond.WakeOne();
+	pThreadSystem->mQueueCond.WakeAll();
 }
 
 void addThreadSystemRangeTask(ThreadSystem* pThreadSystem, TaskFunc task, void* user, uintptr_t start, uintptr_t end)
@@ -159,7 +170,7 @@ void addThreadSystemRangeTask(ThreadSystem* pThreadSystem, TaskFunc task, void* 
 	pThreadSystem->mQueueMutex.Acquire();
 	pThreadSystem->mLoadQueue.emplace_back(ThreadedTask{ task, user, start, end });
 	pThreadSystem->mQueueMutex.Release();
-	pThreadSystem->mQueueCond.WakeOne();
+	pThreadSystem->mQueueCond.WakeAll();
 }
 
 void shutdownThreadSystem(ThreadSystem* pThreadSystem)

@@ -24,9 +24,7 @@
 
 // Unit Test to create Bottom and Top Level Acceleration Structures using Raytracing API.
 
-//tiny stl
-#include "../../../../Common_3/ThirdParty/OpenSource/EASTL/vector.h"
-#include "../../../../Common_3/ThirdParty/OpenSource/EASTL/string.h"
+
 
 //Interfaces
 #include "../../../../Common_3/OS/Interfaces/ICameraController.h"
@@ -38,9 +36,7 @@
 #include "../../../../Common_3/OS/Interfaces/IInput.h"
 #include "../../../../Middleware_3/UI/AppUI.h"
 #include "../../../../Common_3/Renderer/IRenderer.h"
-#include "../../../../Common_3/Renderer/ResourceLoader.h"
-
-#include "../../../../Common_3/Tools/AssimpImporter/AssimpImporter.h"
+#include "../../../../Common_3/Renderer/IResourceLoader.h"
 
 // Raytracing
 #include "../../../../Common_3/Renderer/IRay.h"
@@ -48,6 +44,10 @@
 //Math
 #include "../../../../Common_3/OS/Math/MathTypes.h"
 #include "../../../../Common_3/OS/Interfaces/IMemory.h"
+
+//tiny stl
+#include "../../../../Common_3/ThirdParty/OpenSource/EASTL/vector.h"
+#include "../../../../Common_3/ThirdParty/OpenSource/EASTL/string.h"
 
 // The denoiser is only supported on macOS Catalina and higher. If you want to use the denoiser, set
 // USE_DENOISER to 1 in the #if block below.
@@ -60,7 +60,7 @@
 ICameraController* pCameraController = NULL;
 VirtualJoystickUI gVirtualJoystick;
 
-bool gMicroProfiler = false;
+ProfileToken gGpuProfileToken;
 UIApp gAppUI;
 
 struct ShadersConfigBlock
@@ -86,7 +86,7 @@ struct DenoiserUniforms {
 };
 
 //Sponza
-const char*           gModel_Sponza_File = "sponza.obj";
+const char*           gModel_Sponza_File = "Sponza.gltf";
 
 const char* pMaterialImageFileNames[] = {
     "SponzaPBR_Textures/ao",
@@ -234,17 +234,11 @@ struct UniformObjData
 
 struct PropData
 {
-    eastl::vector<float3> PositionsData;
-    eastl::vector<uint>   IndicesData;
-	
-    Buffer* pPositionStream;
-    Buffer* pNormalStream;
-    Buffer* pUVStream;
-    Buffer* pIndicesStream;
+	Geometry* pGeom;
     Buffer* pMaterialIdStream; // one per primitive
 	Buffer* pMaterialTexturesStream; // 5 per material.
 	
-    Buffer*                     pConstantBuffer;
+    Buffer* pConstantBuffer;
 };
 
 PropData SponzaProp;
@@ -264,308 +258,270 @@ struct PathTracingData {
 
 void AssignSponzaTextures()
 {
-    int AO = 5;
-    int NoMetallic = 6;
-    int Metallic = 7;
+	int AO = 5;
+	int NoMetallic = 6;
 
-    //00 : leaf
-    gSponzaTextureIndexForMaterial.push_back(66);
-    gSponzaTextureIndexForMaterial.push_back(67);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(68);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	//00 : leaf
+	gSponzaTextureIndexForMaterial.push_back(66);
+	gSponzaTextureIndexForMaterial.push_back(67);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(68);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    //01 : vase_round
-    gSponzaTextureIndexForMaterial.push_back(78);
-    gSponzaTextureIndexForMaterial.push_back(79);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(80);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	//01 : vase_round
+	gSponzaTextureIndexForMaterial.push_back(78);
+	gSponzaTextureIndexForMaterial.push_back(79);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(80);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    //02 : Material__57 (Plant)
-    gSponzaTextureIndexForMaterial.push_back(75);
-    gSponzaTextureIndexForMaterial.push_back(76);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(77);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 02 : 16___Default (gi_flag)
+	gSponzaTextureIndexForMaterial.push_back(8);
+	gSponzaTextureIndexForMaterial.push_back(8);    // !!!!!!
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(8);    // !!!!!
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 03 : Material__298
-    gSponzaTextureIndexForMaterial.push_back(9);
-    gSponzaTextureIndexForMaterial.push_back(10);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(11);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	//03 : Material__57 (Plant)
+	gSponzaTextureIndexForMaterial.push_back(75);
+	gSponzaTextureIndexForMaterial.push_back(76);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(77);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 04 : 16___Default (gi_flag)
-    gSponzaTextureIndexForMaterial.push_back(8);
-    gSponzaTextureIndexForMaterial.push_back(8);    // !!!!!!
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(8);    // !!!!!
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 04 : Material__298
+	gSponzaTextureIndexForMaterial.push_back(9);
+	gSponzaTextureIndexForMaterial.push_back(10);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(11);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 05 : bricks
-    gSponzaTextureIndexForMaterial.push_back(22);
-    gSponzaTextureIndexForMaterial.push_back(23);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(24);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 05 : bricks
+	gSponzaTextureIndexForMaterial.push_back(22);
+	gSponzaTextureIndexForMaterial.push_back(23);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(24);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 06 :  arch
-    gSponzaTextureIndexForMaterial.push_back(19);
-    gSponzaTextureIndexForMaterial.push_back(20);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(21);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 06 :  arch
+	gSponzaTextureIndexForMaterial.push_back(19);
+	gSponzaTextureIndexForMaterial.push_back(20);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(21);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 07 : ceiling
-    gSponzaTextureIndexForMaterial.push_back(25);
-    gSponzaTextureIndexForMaterial.push_back(26);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(27);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 07 : ceiling
+	gSponzaTextureIndexForMaterial.push_back(25);
+	gSponzaTextureIndexForMaterial.push_back(26);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(27);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 08 : column_a
-    gSponzaTextureIndexForMaterial.push_back(28);
-    gSponzaTextureIndexForMaterial.push_back(29);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(30);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 08 : column_a
+	gSponzaTextureIndexForMaterial.push_back(28);
+	gSponzaTextureIndexForMaterial.push_back(29);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(30);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 09 : Floor
-    gSponzaTextureIndexForMaterial.push_back(60);
-    gSponzaTextureIndexForMaterial.push_back(61);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(62);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 09 : Floor
+	gSponzaTextureIndexForMaterial.push_back(60);
+	gSponzaTextureIndexForMaterial.push_back(61);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(62);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 10 : column_c
-    gSponzaTextureIndexForMaterial.push_back(34);
-    gSponzaTextureIndexForMaterial.push_back(35);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(36);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 10 : column_c
+	gSponzaTextureIndexForMaterial.push_back(34);
+	gSponzaTextureIndexForMaterial.push_back(35);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(36);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 11 : details
-    gSponzaTextureIndexForMaterial.push_back(45);
-    gSponzaTextureIndexForMaterial.push_back(47);
-    gSponzaTextureIndexForMaterial.push_back(46);
-    gSponzaTextureIndexForMaterial.push_back(48);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 11 : details
+	gSponzaTextureIndexForMaterial.push_back(45);
+	gSponzaTextureIndexForMaterial.push_back(47);
+	gSponzaTextureIndexForMaterial.push_back(46);
+	gSponzaTextureIndexForMaterial.push_back(48);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 12 : column_b
-    gSponzaTextureIndexForMaterial.push_back(31);
-    gSponzaTextureIndexForMaterial.push_back(32);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(33);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 12 : column_b
+	gSponzaTextureIndexForMaterial.push_back(31);
+	gSponzaTextureIndexForMaterial.push_back(32);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(33);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 13 : Material__47 - it seems missing
-    gSponzaTextureIndexForMaterial.push_back(19);
-    gSponzaTextureIndexForMaterial.push_back(20);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(21);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 13 : flagpole
+	gSponzaTextureIndexForMaterial.push_back(57);
+	gSponzaTextureIndexForMaterial.push_back(58);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(59);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 14 : flagpole
-    gSponzaTextureIndexForMaterial.push_back(57);
-    gSponzaTextureIndexForMaterial.push_back(58);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(59);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 14 : fabric_e (green)
+	gSponzaTextureIndexForMaterial.push_back(51);
+	gSponzaTextureIndexForMaterial.push_back(52);
+	gSponzaTextureIndexForMaterial.push_back(53);
+	gSponzaTextureIndexForMaterial.push_back(54);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 15 : fabric_e (green)
-    gSponzaTextureIndexForMaterial.push_back(51);
-    gSponzaTextureIndexForMaterial.push_back(52);
-    gSponzaTextureIndexForMaterial.push_back(53);
-    gSponzaTextureIndexForMaterial.push_back(54);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 15 : fabric_d (blue)
+	gSponzaTextureIndexForMaterial.push_back(49);
+	gSponzaTextureIndexForMaterial.push_back(50);
+	gSponzaTextureIndexForMaterial.push_back(53);
+	gSponzaTextureIndexForMaterial.push_back(54);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 16 : fabric_d (blue)
-    gSponzaTextureIndexForMaterial.push_back(49);
-    gSponzaTextureIndexForMaterial.push_back(50);
-    gSponzaTextureIndexForMaterial.push_back(53);
-    gSponzaTextureIndexForMaterial.push_back(54);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 16 : fabric_a (red)
+	gSponzaTextureIndexForMaterial.push_back(55);
+	gSponzaTextureIndexForMaterial.push_back(56);
+	gSponzaTextureIndexForMaterial.push_back(53);
+	gSponzaTextureIndexForMaterial.push_back(54);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 17 : fabric_a (red)
-    gSponzaTextureIndexForMaterial.push_back(55);
-    gSponzaTextureIndexForMaterial.push_back(56);
-    gSponzaTextureIndexForMaterial.push_back(53);
-    gSponzaTextureIndexForMaterial.push_back(54);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 17 : fabric_g (curtain_blue)
+	gSponzaTextureIndexForMaterial.push_back(37);
+	gSponzaTextureIndexForMaterial.push_back(38);
+	gSponzaTextureIndexForMaterial.push_back(43);
+	gSponzaTextureIndexForMaterial.push_back(44);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 18 : fabric_g (curtain_blue)
-    gSponzaTextureIndexForMaterial.push_back(37);
-    gSponzaTextureIndexForMaterial.push_back(38);
-    gSponzaTextureIndexForMaterial.push_back(43);
-    gSponzaTextureIndexForMaterial.push_back(44);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 18 : fabric_c (curtain_red)
+	gSponzaTextureIndexForMaterial.push_back(41);
+	gSponzaTextureIndexForMaterial.push_back(42);
+	gSponzaTextureIndexForMaterial.push_back(43);
+	gSponzaTextureIndexForMaterial.push_back(44);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 19 : fabric_c (curtain_red)
-    gSponzaTextureIndexForMaterial.push_back(41);
-    gSponzaTextureIndexForMaterial.push_back(42);
-    gSponzaTextureIndexForMaterial.push_back(43);
-    gSponzaTextureIndexForMaterial.push_back(44);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 19 : fabric_f (curtain_green)
+	gSponzaTextureIndexForMaterial.push_back(39);
+	gSponzaTextureIndexForMaterial.push_back(40);
+	gSponzaTextureIndexForMaterial.push_back(43);
+	gSponzaTextureIndexForMaterial.push_back(44);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 20 : fabric_f (curtain_green)
-    gSponzaTextureIndexForMaterial.push_back(39);
-    gSponzaTextureIndexForMaterial.push_back(40);
-    gSponzaTextureIndexForMaterial.push_back(43);
-    gSponzaTextureIndexForMaterial.push_back(44);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 20 : chain
+	gSponzaTextureIndexForMaterial.push_back(12);
+	gSponzaTextureIndexForMaterial.push_back(14);
+	gSponzaTextureIndexForMaterial.push_back(13);
+	gSponzaTextureIndexForMaterial.push_back(15);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 21 : chain
-    gSponzaTextureIndexForMaterial.push_back(12);
-    gSponzaTextureIndexForMaterial.push_back(14);
-    gSponzaTextureIndexForMaterial.push_back(13);
-    gSponzaTextureIndexForMaterial.push_back(15);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 21 : vase_hanging
+	gSponzaTextureIndexForMaterial.push_back(72);
+	gSponzaTextureIndexForMaterial.push_back(73);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(74);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 22 : vase_hanging
-    gSponzaTextureIndexForMaterial.push_back(72);
-    gSponzaTextureIndexForMaterial.push_back(73);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(74);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 22 : vase
+	gSponzaTextureIndexForMaterial.push_back(69);
+	gSponzaTextureIndexForMaterial.push_back(70);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(71);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 23 : vase
-    gSponzaTextureIndexForMaterial.push_back(69);
-    gSponzaTextureIndexForMaterial.push_back(70);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(71);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 23 : Material__25 (lion)
+	gSponzaTextureIndexForMaterial.push_back(16);
+	gSponzaTextureIndexForMaterial.push_back(17);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(18);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 24 : Material__25 (lion)
-    gSponzaTextureIndexForMaterial.push_back(16);
-    gSponzaTextureIndexForMaterial.push_back(17);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(18);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 24 : roof
+	gSponzaTextureIndexForMaterial.push_back(63);
+	gSponzaTextureIndexForMaterial.push_back(64);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(65);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 
-    // 25 : roof
-    gSponzaTextureIndexForMaterial.push_back(63);
-    gSponzaTextureIndexForMaterial.push_back(64);
-    gSponzaTextureIndexForMaterial.push_back(NoMetallic);
-    gSponzaTextureIndexForMaterial.push_back(65);
-    gSponzaTextureIndexForMaterial.push_back(AO);
+	// 25 : Material__47 - it seems missing
+	gSponzaTextureIndexForMaterial.push_back(19);
+	gSponzaTextureIndexForMaterial.push_back(20);
+	gSponzaTextureIndexForMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexForMaterial.push_back(21);
+	gSponzaTextureIndexForMaterial.push_back(AO);
 }
 
 bool LoadSponza()
 {
-    for (int i = 0; i < TOTAL_IMGS; ++i)
-    {
-        PathHandle texturePath = fsCopyPathInResourceDirectory(RD_TEXTURES, pMaterialImageFileNames[i]);
-        TextureLoadDesc textureDesc = {};
-        textureDesc.pFilePath = texturePath;
-        textureDesc.ppTexture = &pMaterialTextures[i];
-        addResource(&textureDesc, true);
-    }
-
-    AssimpImporter importer;
-
-    AssimpImporter::Model gModel_Sponza;
-    PathHandle sceneFullPath = fsCopyPathInResourceDirectory(RD_MESHES, gModel_Sponza_File);
-    if (!importer.ImportModel(sceneFullPath, &gModel_Sponza))
-    {
-        LOGF(LogLevel::eERROR, "Failed to load %s", fsGetPathFileName(sceneFullPath).buffer);
-        finishResourceLoading();
-        return false;
-    }
-
-    size_t meshCount = gModel_Sponza.mMeshArray.size();
-    size_t sponza_matCount = gModel_Sponza.mMaterialList.size();
-
-	size_t totalVertexCount = 0;
-	size_t totalPrimitiveCount = 0;
-	
-	eastl::vector<float3> normals;
-	eastl::vector<float2> uvs;
-	eastl::vector<uint32_t> materialIds;
-	
-	for (size_t i = 0; i < gModel_Sponza.mMeshArray.size(); i += 1)
-    {
-		if (i == 4)
-			continue; // Skip the large flag in the middle of the room
-		
-		AssimpImporter::Mesh& subMesh = gModel_Sponza.mMeshArray[i];
-		totalVertexCount += subMesh.mPositions.size();
-		totalPrimitiveCount += subMesh.mIndices.size() / 3;
+	for (int i = 0; i < TOTAL_IMGS; ++i)
+	{
+		PathHandle texturePath = fsGetPathInResourceDirEnum(RD_TEXTURES, pMaterialImageFileNames[i]);
+		TextureLoadDesc textureDesc = {};
+		textureDesc.pFilePath = texturePath;
+		textureDesc.ppTexture = &pMaterialTextures[i];
+		addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
 	}
 
-	SponzaProp.PositionsData.reserve(totalVertexCount);
-	SponzaProp.IndicesData.reserve(totalPrimitiveCount * 3);
-	normals.reserve(totalVertexCount);
-	uvs.reserve(totalVertexCount);
-	materialIds.reserve(totalPrimitiveCount);
-	
-	for (size_t i = 0; i < gModel_Sponza.mMeshArray.size(); i += 1)
+	VertexLayout vertexLayout = {};
+	vertexLayout.mAttribCount = 3;
+
+	vertexLayout.mAttribs[0].mSemantic = SEMANTIC_POSITION;
+	vertexLayout.mAttribs[0].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
+	vertexLayout.mAttribs[0].mBinding = 0;
+	vertexLayout.mAttribs[0].mLocation = 0;
+	vertexLayout.mAttribs[0].mOffset = 0;
+
+	//normals
+	vertexLayout.mAttribs[1].mSemantic = SEMANTIC_NORMAL;
+	vertexLayout.mAttribs[1].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
+	vertexLayout.mAttribs[1].mLocation = 1;
+	vertexLayout.mAttribs[1].mBinding = 1;
+	vertexLayout.mAttribs[1].mOffset = 0;
+
+	//texture
+	vertexLayout.mAttribs[2].mSemantic = SEMANTIC_TEXCOORD0;
+	vertexLayout.mAttribs[2].mFormat = TinyImageFormat_R32G32_SFLOAT;
+	vertexLayout.mAttribs[2].mLocation = 2;
+	vertexLayout.mAttribs[2].mBinding = 2;
+	vertexLayout.mAttribs[2].mOffset = 0;
+
+	SyncToken token = {};
+	PathHandle sceneFullPath = fsGetPathInResourceDirEnum(RD_MESHES, gModel_Sponza_File);
+	GeometryLoadDesc loadDesc = {};
+	loadDesc.pFilePath = sceneFullPath;
+	loadDesc.ppGeometry = &SponzaProp.pGeom;
+	loadDesc.pVertexLayout = &vertexLayout;
+	loadDesc.mFlags = GEOMETRY_LOAD_FLAG_SHADOWED;
+	addResource(&loadDesc, &token, LOAD_PRIORITY_HIGH);
+
+	waitForToken(&token);
+
+	uint32_t gMaterialIds[] =
+	{
+		0, 3, 1, 4, 5, 6, 7, 8, 6, 9, 7, 6, 10, 5, 7, 5, 6,
+		7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7,
+		6, 5, 6, 5, 11, 5, 11, 5, 11, 5, 10, 5, 9, 8, 6, 12,
+		2, 5, 13, 0, 14, 15, 16, 14, 15, 14, 16, 15, 13, 17, 18,
+		19, 18, 19, 18, 17, 19, 18, 17, 20, 21, 20, 21, 20, 21, 20,
+		21, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 22, 23, 4, 23, 4, 5, 24, 5,
+	};
+
+	uint32_t totalPrimitiveCount = SponzaProp.pGeom->mIndexCount / 3;
+	BufferLoadDesc desc = {};
+	desc.mDesc.mDescriptors = DESCRIPTOR_TYPE_BUFFER_RAW;
+	desc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
+	desc.mDesc.mSize = totalPrimitiveCount * sizeof(uint32_t);
+	desc.mDesc.mElementCount = totalPrimitiveCount;
+	desc.ppBuffer = &SponzaProp.pMaterialIdStream;
+	addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
+
+	BufferUpdateDesc updateDesc = {};
+	updateDesc.pBuffer = SponzaProp.pMaterialIdStream;
+	beginUpdateResource(&updateDesc);
+
+	for (uint32_t i = 0, count = 0; i < SponzaProp.pGeom->mDrawArgCount; ++i)
     {
-		if (i == 4)
-			continue; // Skip the large flag in the middle of the room
-		
-		AssimpImporter::Mesh& subMesh = gModel_Sponza.mMeshArray[i];
-		
-		uint32_t baseVertex = (uint32_t)SponzaProp.PositionsData.size();
-		for (uint32_t index : subMesh.mIndices)
-			SponzaProp.IndicesData.push_back(index + baseVertex);
-		
-		for (float3 position : subMesh.mPositions)
-			SponzaProp.PositionsData.push_back(position);
-	
-		for (float3 normal : subMesh.mNormals)
-			normals.push_back(normal);
-			
-		for (float2 uv : subMesh.mUvs)
-			uvs.push_back(uv);
-		
-		size_t meshPrimitiveCount = subMesh.mIndices.size() / 3;
-		for (size_t i = 0; i < meshPrimitiveCount; i += 1)
+		size_t meshPrimitiveCount = SponzaProp.pGeom->pDrawArgs[i].mIndexCount / 3;
+		for (uint32_t j = 0; j < meshPrimitiveCount; ++j)
 		{
-			materialIds.push_back(subMesh.mMaterialId);
+			((uint32_t*)updateDesc.pMappedData)[count++] = gMaterialIds[i];
 		}
 	}
-		
-	BufferLoadDesc desc = {};
-	desc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
-	desc.mDesc.mDescriptors = DESCRIPTOR_TYPE_BUFFER;
-	desc.mDesc.mSize = totalPrimitiveCount * 3 * sizeof(uint32_t);
-	desc.ppBuffer = &SponzaProp.pIndicesStream;
-	desc.pData = SponzaProp.IndicesData.data();
-	desc.mDesc.mFormat = TinyImageFormat_R32_UINT;
-	desc.mDesc.mElementCount = totalPrimitiveCount * 3;
-	desc.mDesc.mStructStride = sizeof(uint);
-	addResource(&desc);
 
-	desc.mDesc.mSize = totalVertexCount * sizeof(float3);
-	desc.mDesc.mFormat = TinyImageFormat_R32G32B32_SFLOAT;
-	desc.mDesc.mElementCount = totalVertexCount;
-	desc.mDesc.mVertexStride = sizeof(float3);
-	desc.mDesc.mStructStride = sizeof(float3);
-	desc.ppBuffer = &SponzaProp.pPositionStream;
-	desc.pData = SponzaProp.PositionsData.data();
-	addResource(&desc);
-	
-	desc.mDesc.mSize = totalVertexCount * sizeof(float3);
-	desc.ppBuffer = &SponzaProp.pNormalStream;
-	desc.pData = normals.data();
-	addResource(&desc);
-	
-	desc.mDesc.mSize = totalVertexCount * sizeof(float2);
-	desc.mDesc.mFormat = TinyImageFormat_R32G32_SFLOAT;
-	desc.mDesc.mVertexStride = sizeof(float2);
-	desc.mDesc.mStructStride = sizeof(float2);
-	desc.ppBuffer = &SponzaProp.pUVStream;
-	desc.pData = uvs.data();
-	addResource(&desc);
-
-	desc.mDesc.mSize = totalPrimitiveCount * sizeof(uint32_t);
-	desc.mDesc.mFormat = TinyImageFormat_R32_UINT;
-	desc.mDesc.mElementCount = totalPrimitiveCount;
-	desc.mDesc.mStructStride = sizeof(uint);
-	desc.ppBuffer = &SponzaProp.pMaterialIdStream;
-	desc.pData = materialIds.data();
-	addResource(&desc);
+	endUpdateResource(&updateDesc, NULL);
 
     //set constant buffer for sponza
     {
@@ -579,7 +535,7 @@ bool LoadSponza()
         desc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
         desc.pData = &data;
         desc.ppBuffer = &SponzaProp.pConstantBuffer;
-        addResource(&desc);
+        addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
     }
 	
 	AssignSponzaTextures();
@@ -588,16 +544,15 @@ bool LoadSponza()
 	desc.mDesc.mElementCount = (uint32_t)gSponzaTextureIndexForMaterial.size();
 	desc.ppBuffer = &SponzaProp.pMaterialTexturesStream;
 	desc.pData = gSponzaTextureIndexForMaterial.data();
-	addResource(&desc);
+	addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
 	
-    finishResourceLoading();
-    return true;
+	return true;
 }
 
 
 void UnloadSponza()
 {
-	if (SponzaProp.PositionsData.empty())
+	if (!SponzaProp.pGeom)
 		return;
 	
     for (int i = 0; i < TOTAL_IMGS; ++i)
@@ -605,19 +560,16 @@ void UnloadSponza()
 
 	gSponzaTextureIndexForMaterial.set_capacity(0);
 	
-	SponzaProp.PositionsData.set_capacity(0);
-	SponzaProp.IndicesData.set_capacity(0);
+	conf_free(SponzaProp.pGeom->pShadow);
 	
-	removeResource(SponzaProp.pPositionStream);
-	removeResource(SponzaProp.pNormalStream);
-	removeResource(SponzaProp.pUVStream);
-	removeResource(SponzaProp.pIndicesStream);
+	removeResource(SponzaProp.pGeom);
 	removeResource(SponzaProp.pMaterialIdStream);
 	removeResource(SponzaProp.pMaterialTexturesStream);
 	removeResource(SponzaProp.pConstantBuffer);
 }
 
-static float haltonSequence(uint index, uint base) {
+static float haltonSequence(uint index, uint base)
+{
     float f = 1.f;
     float r = 0.f;
     
@@ -639,24 +591,50 @@ public:
 #ifdef TARGET_IOS
 		mSettings.mContentScaleFactor = 1.f;
 #endif
+        ReadCmdArgs();
 	}
+
+    void ReadCmdArgs()
+    {
+        for (int i = 0; i < argc; i += 1)
+        {
+            if (strcmp(argv[i], "-w") == 0 && i + 1 < argc)
+                mSettings.mWidth = min(max(atoi(argv[i + 1]), 64), 10000);
+            else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc)
+                mSettings.mHeight = min(max(atoi(argv[i + 1]), 64), 10000);
+            else if (strcmp(argv[i], "-b") == 0)
+            {
+                mBenchmark = true;
+                if (i + 1 < argc && isdigit(*argv[i + 1]))
+                    nBenchmarkFrames = min(max(atoi(argv[i + 1]), 32), 512);
+            }
+            else if (strcmp(argv[i], "-f") == 0)
+            {
+                mSettings.mFullScreen = true;
+            }
+            else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc)
+            {
+				strcpy(mOutput, argv[i + 1]);
+            }
+        }
+    }
 	
 	bool Init()
 	{
         // FILE PATHS
-        PathHandle programDirectory = fsCopyProgramDirectoryPath();
+        PathHandle programDirectory = fsGetApplicationDirectory();
         if (!fsPlatformUsesBundledResources())
         {
             PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/16_Raytracing");
-            fsSetResourceDirectoryRootPath(resourceDirRoot);
+            fsSetResourceDirRootPath(resourceDirRoot);
             
-			fsSetRelativePathForResourceDirectory(RD_TEXTURES,        				 "../../../../Art/Sponza/Textures");
-			fsSetRelativePathForResourceDirectory(RD_MESHES,          				 "../../../../Art/Sponza/Meshes");
-            fsSetRelativePathForResourceDirectory(RD_BUILTIN_FONTS,   				 "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirectory(RD_ANIMATIONS,      				 "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirectory(RD_MIDDLEWARE_TEXT, 				 "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirectory(RD_MIDDLEWARE_UI,   				 "../../../../Middleware_3/UI");
-            fsSetRelativePathForResourceDirectory(RD_MIDDLEWARE_3, 					 "../../../../Middleware_3/ParallelPrimitives");
+			fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        				 "../../../../Art/Sponza/Textures");
+			fsSetRelativePathForResourceDirEnum(RD_MESHES,          				 "../../../../Art/Sponza/Meshes");
+            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,   				 "../../UnitTestResources/Fonts");
+            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,      				 "../../UnitTestResources/Animation");
+            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT, 				 "../../../../Middleware_3/Text");
+            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,   				 "../../../../Middleware_3/UI");
+            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_3, 					 "../../../../Middleware_3/ParallelPrimitives");
         }
         
 		if (!initInputSystem(pWindow))
@@ -673,10 +651,16 @@ public:
 		initResourceLoaderInterface(pRenderer);
 
 		QueueDesc queueDesc = {};
-		queueDesc.mType = CMD_POOL_DIRECT;
+		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
+		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pQueue);
-		addCmdPool(pRenderer, pQueue, false, &pCmdPool);
-		addCmd_n(pCmdPool, false, gImageCount, &ppCmds);
+		CmdPoolDesc cmdPoolDesc = {};
+		cmdPoolDesc.pQueue = pQueue;
+		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
+		CmdDesc cmdDesc = {};
+		cmdDesc.pPool = pCmdPool;
+		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+
 		addSemaphore(pRenderer, &pImageAcquiredSemaphore);
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -684,14 +668,14 @@ public:
 			addSemaphore(pRenderer, &pRenderCompleteSemaphores[i]);
 		}
 
-    if (!gAppUI.Init(pRenderer))
-      return false;
+		if (!gAppUI.Init(pRenderer))
+			return false;
 
-    gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
 
-		initProfiler();
-
-		addGpuProfiler(pRenderer, pQueue, &pGpuProfiler, "GpuProfiler");
+        const char* ppGpuProfilerName[1] = { "Graphics" };
+        initProfiler(pRenderer, &pQueue, ppGpuProfilerName, &gGpuProfileToken, 1);
+        if (mBenchmark) setAggregateFrames(nBenchmarkFrames);
 
 		/************************************************************************/
 		// GUI
@@ -700,8 +684,6 @@ public:
 		guiDesc.mStartSize = vec2(300.0f, 250.0f);
 		guiDesc.mStartPosition = vec2(0.0f, guiDesc.mStartSize.getY());
 		pGuiWindow = gAppUI.AddGuiComponent(GetName(), &guiDesc);
-
-		pGuiWindow->AddWidget(CheckboxWidget("Toggle Micro Profiler", &gMicroProfiler));
         /************************************************************************/
         // Blit texture
         /************************************************************************/
@@ -727,10 +709,6 @@ public:
         rootDesc.mShaderCount = 1;
         rootDesc.ppShaders = &pDisplayTextureShader;
         addRootSignature(pRenderer, &rootDesc, &pDisplayTextureSignature);
-
-        RasterizerStateDesc rasterizerStateDesc = {};
-        rasterizerStateDesc.mCullMode = CULL_MODE_NONE;
-        addRasterizerState(pRenderer, &rasterizerStateDesc, &pRast);
 		
 		CameraMotionParameters cmp{ 200.0f, 250.0f, 300.0f };
 		vec3                   camPos{ 100.0f, 300.0f, 0.0f };
@@ -762,12 +740,13 @@ public:
 		
 		/************************************************************************/
 		/************************************************************************/
-		
-        if (!LoadSponza())
-            return false;
+		if (!LoadSponza())
+			return false;
 		
 		// App Actions
-		InputActionDesc actionDesc = { InputBindings::BUTTON_FULLSCREEN, [](InputActionContext* ctx) { toggleFullscreen(((IApp*)ctx->pUserData)->pWindow); return true; }, this };
+        InputActionDesc actionDesc = { InputBindings::BUTTON_DUMP, [](InputActionContext* ctx) { dumpProfileData(((Renderer*)ctx->pUserData), ((Renderer*)ctx->pUserData)->pName); return true; }, pRenderer };
+        addInputAction(&actionDesc);
+		actionDesc = { InputBindings::BUTTON_FULLSCREEN, [](InputActionContext* ctx) { toggleFullscreen(((IApp*)ctx->pUserData)->pWindow); return true; }, this };
 		addInputAction(&actionDesc);
 		actionDesc = { InputBindings::BUTTON_EXIT, [](InputActionContext* ctx) { requestShutdown(); return true; } };
 		addInputAction(&actionDesc);
@@ -784,7 +763,7 @@ public:
 		typedef bool (*CameraInputHandler)(InputActionContext* ctx, uint32_t index);
 		static CameraInputHandler onCameraInput = [](InputActionContext* ctx, uint32_t index)
 		{
-			if (!gMicroProfiler && !gAppUI.IsFocused() && *ctx->pCaptured)
+			if (!gAppUI.IsFocused() && *ctx->pCaptured)
 			{
 				gVirtualJoystick.OnMove(index, ctx->mPhase != INPUT_ACTION_PHASE_CANCELED, ctx->pPosition);
 				index ? pCameraController->onRotate(ctx->mFloat2) : pCameraController->onMove(ctx->mFloat2);
@@ -806,14 +785,12 @@ public:
 		/************************************************************************/
 		// 02 Creation Acceleration Structure
 		/************************************************************************/
-        
-
 		AccelerationStructureGeometryDesc geomDesc = {};
 		geomDesc.mFlags = ACCELERATION_STRUCTURE_GEOMETRY_FLAG_OPAQUE;
-		geomDesc.pVertexArray = SponzaProp.PositionsData.data();
-		geomDesc.vertexCount = (uint32_t)SponzaProp.PositionsData.size();
-		geomDesc.pIndices32 = SponzaProp.IndicesData.data();
-		geomDesc.indicesCount = (uint32_t)SponzaProp.IndicesData.size();
+		geomDesc.pVertexArray = SponzaProp.pGeom->pShadow->pAttributes[SEMANTIC_POSITION];
+		geomDesc.vertexCount = (uint32_t)SponzaProp.pGeom->mVertexCount;
+		geomDesc.pIndices32 = (uint32_t*)SponzaProp.pGeom->pShadow->pIndices;
+		geomDesc.indicesCount = (uint32_t)SponzaProp.pGeom->mIndexCount;
 		geomDesc.indexType = INDEX_TYPE_UINT32;
 		
 		AccelerationStructureDescBottom bottomASDesc = {};
@@ -851,7 +828,12 @@ public:
         beginCmd(ppCmds[0]);
 		cmdBuildAccelerationStructure(ppCmds[0], pRaytracing, &buildASDesc);
         endCmd(ppCmds[0]);
-        queueSubmit(pQueue, 1, &ppCmds[0], pRenderCompleteFences[0], 0, NULL, 0, NULL);
+		QueueSubmitDesc submitDesc = {};
+		submitDesc.mCmdCount = 1;
+		submitDesc.ppCmds = ppCmds;
+		submitDesc.pSignalFence = pRenderCompleteFences[0];
+		submitDesc.mSubmitDone = true;
+        queueSubmit(pQueue, &submitDesc);
         waitForFences(pRenderer, 1, &pRenderCompleteFences[0]);
         /************************************************************************/
         // 03 - Create Raytracing Shaders
@@ -919,13 +901,7 @@ public:
         pipelineDesc.pHitGroups				= hitGroups;
         pipelineDesc.mHitGroupCount			= 2;
 		pipelineDesc.pRaytracing			= pRaytracing;
-#ifdef METAL
-        //use screen resolution on iOS device
-        pipelineDesc.mMaxRaysCount = (mSettings.mHeight * mSettings.mWidth);
-        //RM: there is some issues with retina scale factor calculation. Need to fix it
-#else
-        pipelineDesc.mMaxRaysCount = 1920 * 1080; //1 ray per pixel in FHD resolution
-#endif
+        pipelineDesc.mMaxRaysCount = mSettings.mHeight * mSettings.mWidth;
         addPipeline(pRenderer, &rtPipelineDesc, &pPipeline);
         /************************************************************************/
         // 04 - Create Shader Binding Table to connect Pipeline with Acceleration Structure
@@ -937,7 +913,7 @@ public:
 		for (uint32_t i = 0; i < gImageCount; i++)
 		{
 			ubDesc.ppBuffer = &pRayGenConfigBuffer[i];
-			addResource(&ubDesc);
+			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 		}
 
 		DescriptorSetDesc setDesc = { pDisplayTextureSignature, DESCRIPTOR_UPDATE_FREQ_PER_FRAME, gImageCount };
@@ -959,6 +935,8 @@ public:
         shaderTableDesc.pHitGroups = hitGroupNames;
         addRaytracingShaderTable(pRaytracing, &shaderTableDesc, &pShaderTable);
 
+		waitForAllResourceLoads();
+
 		DescriptorData params[1] = {};
 		params[0].pName = "gSettings";
 		for (uint32_t i = 0; i < gImageCount; ++i)
@@ -966,25 +944,30 @@ public:
 			params[0].ppBuffers = &pRayGenConfigBuffer[i];
 			updateDescriptorSet(pRenderer, i, pDescriptorSetUniforms, 1, params);
 		}
-		
+
 		return true;
 	}
-
+	
 	void Exit()
 	{
 		waitQueueIdle(pQueue);
 
 		exitInputSystem();
 
+        if (mBenchmark)
+        {
+            dumpProfileData(pRenderer, mOutput, nBenchmarkFrames);
+            dumpBenchmarkData(pRenderer, &mSettings, mOutput);
+        }
+        
 		exitProfiler();
-		
+        
 		destroyCameraController(pCameraController);
 
 		gAppUI.Exit();
 		gVirtualJoystick.Exit(); 
 		UnloadSponza();
 
-		removeGpuProfiler(pRenderer, pGpuProfiler);
 
 		if (pRaytracing != NULL)
 		{
@@ -1009,7 +992,6 @@ public:
 		removeDescriptorSet(pRenderer, pDescriptorSetTexture);
 
 		removeSampler(pRenderer, pSampler);
-		removeRasterizerState(pRast);
 		removeShader(pRenderer, pDisplayTextureShader);
 		removeRootSignature(pRenderer, pDisplayTextureSignature);
 
@@ -1019,10 +1001,10 @@ public:
 			removeSemaphore(pRenderer, pRenderCompleteSemaphores[i]);
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
-		removeCmd_n(pCmdPool, gImageCount, ppCmds);
+		removeCmd_n(pRenderer, gImageCount, ppCmds);
 		removeCmdPool(pRenderer, pCmdPool);
-		removeQueue(pQueue);
-		removeResourceLoaderInterface(pRenderer);
+		removeQueue(pRenderer, pQueue);
+        exitResourceLoaderInterface(pRenderer);
 		removeRenderer(pRenderer);
 	}
 
@@ -1051,12 +1033,12 @@ public:
 		TextureLoadDesc loadDesc = {};
 		loadDesc.pDesc = &uavDesc;
 		loadDesc.ppTexture = &pComputeOutput;
-		addResource(&loadDesc);
+		addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
 		
 #if USE_DENOISER
 		uavDesc.mFormat = TinyImageFormat_B10G10R10A2_UNORM;
 		loadDesc.ppTexture = &pAlbedoTexture;
-		addResource(&loadDesc);
+		addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
 #endif
 
 		SwapChainDesc swapChainDesc = {};
@@ -1065,7 +1047,6 @@ public:
 		swapChainDesc.mEnableVsync = false;
 		swapChainDesc.mHeight = mSettings.mHeight;
 		swapChainDesc.mImageCount = gImageCount;
-		swapChainDesc.mSampleCount = SAMPLE_COUNT_1;
 		swapChainDesc.mWidth = mSettings.mWidth;
 		swapChainDesc.ppPresentQueues = &pQueue;
 		swapChainDesc.mPresentQueueCount = 1;
@@ -1109,28 +1090,26 @@ public:
 			RasterizerStateDesc rasterState = {};
 			rasterState.mCullMode = CULL_MODE_BACK;
 			rasterState.mFrontFace = FRONT_FACE_CW;
-			addRasterizerState(pRenderer, &rasterState, &pDenoiserRasterState);
 			
 			DepthStateDesc depthStateDesc = {};
 			depthStateDesc.mDepthTest = true;
 			depthStateDesc.mDepthWrite = true;
 			depthStateDesc.mDepthFunc = CMP_LEQUAL;
-			addDepthState(pRenderer, &depthStateDesc, &pDenoiserDepthState);
 			
 			PipelineDesc pipelineDesc = {};
 			pipelineDesc.mType = PIPELINE_TYPE_GRAPHICS;
 			
-			TinyImageFormat rtFormats[] = { pDepthNormalRenderTarget[0]->pTexture->mDesc.mFormat, pMotionVectorRenderTarget->pTexture->mDesc.mFormat };
+			TinyImageFormat rtFormats[] = { pDepthNormalRenderTarget[0]->mFormat, pMotionVectorRenderTarget->mFormat };
 			
 			VertexLayout vertexLayout = {};
 			vertexLayout.mAttribCount = 0;
 			GraphicsPipelineDesc& pipelineSettings = pipelineDesc.mGraphicsDesc;
 			pipelineSettings.mPrimitiveTopo = PRIMITIVE_TOPO_TRI_LIST;
-			pipelineSettings.pRasterizerState = pDenoiserRasterState;
+			pipelineSettings.pRasterizerState = &rasterState;
 			pipelineSettings.mRenderTargetCount = 2;
 			pipelineSettings.pColorFormats = rtFormats;
-			pipelineSettings.mDepthStencilFormat = pDepthRenderTarget->mDesc.mFormat;
-			pipelineSettings.pDepthState = pDenoiserDepthState;
+			pipelineSettings.mDepthStencilFormat = pDepthRenderTarget->mFormat;
+			pipelineSettings.pDepthState = &depthStateDesc;
 			pipelineSettings.mSampleCount = SAMPLE_COUNT_1;
 			pipelineSettings.mSampleQuality = 0;
 			pipelineSettings.pVertexLayout = &vertexLayout;
@@ -1146,7 +1125,7 @@ public:
 			for (uint32_t i = 0; i < gImageCount; i++)
 			{
 				ubDesc.ppBuffer = &pDenoiserInputsUniformBuffer[i];
-				addResource(&ubDesc);
+				addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 			}
 			
 			DescriptorSetDesc setDesc = { pDenoiserInputsRootSignature, DESCRIPTOR_UPDATE_FREQ_PER_FRAME, gImageCount };
@@ -1164,6 +1143,9 @@ public:
 			addSSVGFDenoiser(pRenderer, &pDenoiser);
 		}
 #endif
+
+		RasterizerStateDesc rasterizerStateDesc = {};
+		rasterizerStateDesc.mCullMode = CULL_MODE_NONE;
         
         VertexLayout vertexLayout = {};
         vertexLayout.mAttribCount = 0;
@@ -1171,11 +1153,11 @@ public:
 		graphicsPipelineDesc.mType = PIPELINE_TYPE_GRAPHICS;
         GraphicsPipelineDesc& pipelineSettings = graphicsPipelineDesc.mGraphicsDesc;
         pipelineSettings.mPrimitiveTopo = PRIMITIVE_TOPO_TRI_LIST;
-        pipelineSettings.pRasterizerState = pRast;
+        pipelineSettings.pRasterizerState = &rasterizerStateDesc;
         pipelineSettings.mRenderTargetCount = 1;
-        pipelineSettings.pColorFormats = &pSwapChain->ppSwapchainRenderTargets[0]->mDesc.mFormat;
-        pipelineSettings.mSampleCount = pSwapChain->ppSwapchainRenderTargets[0]->mDesc.mSampleCount;
-        pipelineSettings.mSampleQuality = pSwapChain->ppSwapchainRenderTargets[0]->mDesc.mSampleQuality;
+        pipelineSettings.pColorFormats = &pSwapChain->ppRenderTargets[0]->mFormat;
+        pipelineSettings.mSampleCount = pSwapChain->ppRenderTargets[0]->mSampleCount;
+        pipelineSettings.mSampleQuality = pSwapChain->ppRenderTargets[0]->mSampleQuality;
         pipelineSettings.pVertexLayout = &vertexLayout;
         pipelineSettings.pRootSignature = pDisplayTextureSignature;
         pipelineSettings.pShaderProgram = pDisplayTextureShader;
@@ -1184,22 +1166,23 @@ public:
 		/************************************************************************/
 		
 #ifdef TARGET_IOS
-		ResourceDirectory circlePadDirectory = RD_ROOT;
+		ResourceDirEnum circlePadDirectory = RD_ROOT;
 #else
-		ResourceDirectory circlePadDirectory = RD_TEXTURES;
+		ResourceDirEnum circlePadDirectory = RD_TEXTURES;
 #endif
 		
 		if (!gVirtualJoystick.Init(pRenderer, "circlepad", circlePadDirectory))
 			return false;
 		
-		if (!gAppUI.Load(pSwapChain->ppSwapchainRenderTargets))
+		if (!gAppUI.Load(pSwapChain->ppRenderTargets))
 			return false;
 
-		if (!gVirtualJoystick.Load(pSwapChain->ppSwapchainRenderTargets[0]))
+		if (!gVirtualJoystick.Load(pSwapChain->ppRenderTargets[0]))
 			return false;
 
-		loadProfiler(&gAppUI, mSettings.mWidth, mSettings.mHeight);
+		loadProfilerUI(&gAppUI, mSettings.mWidth, mSettings.mHeight);
 
+		waitForAllResourceLoads();
 		
 		DescriptorData params[9] = {};
 
@@ -1210,13 +1193,13 @@ public:
 			
 			
 			params[1].pName = "indices";
-			params[1].ppBuffers = &SponzaProp.pIndicesStream;
+			params[1].ppBuffers = &SponzaProp.pGeom->pIndexBuffer;
 			params[2].pName = "positions";
-			params[2].ppBuffers = &SponzaProp.pPositionStream;
+			params[2].ppBuffers = &SponzaProp.pGeom->pVertexBuffers[0];
 			params[3].pName = "normals";
-			params[3].ppBuffers = &SponzaProp.pNormalStream;
+			params[3].ppBuffers = &SponzaProp.pGeom->pVertexBuffers[1];
 			params[4].pName = "uvs";
-			params[4].ppBuffers = &SponzaProp.pUVStream;
+			params[4].ppBuffers = &SponzaProp.pGeom->pVertexBuffers[2];
 			params[5].pName = "materialIndices";
 			params[5].ppBuffers = &SponzaProp.pMaterialIdStream;
 			params[6].pName = "materialTextureIndices";
@@ -1252,9 +1235,9 @@ public:
 
 	void Unload()
 	{
-		waitQueueIdle(pQueue);
+        waitQueueIdle(pQueue);
 
-		unloadProfiler();
+		unloadProfilerUI();
 		gAppUI.Unload();
 		gVirtualJoystick.Unload();
 		
@@ -1279,36 +1262,32 @@ public:
 		removePipeline(pRenderer, pDenoiserInputsPipeline);
 		removeRootSignature(pRenderer, pDenoiserInputsRootSignature);
 		removeShader(pRenderer, pDenoiserInputsShader);
-		removeDepthState(pDenoiserDepthState);
-		removeRasterizerState(pDenoiserRasterState);
-		
 		removeSSVGFDenoiser(pDenoiser);
 #endif
 	}
 
 	void Update(float deltaTime)
 	{
+        PROFILER_SET_CPU_SCOPE("Cpu Profile", "update", 0x222222);
+
+        if (mBenchmark && nFrameCount > nBenchmarkFrames*2)
+        {
+            requestShutdown();
+        }
+
 		updateInputSystem(mSettings.mWidth, mSettings.mHeight);
 
 		pCameraController->update(deltaTime);
-		
-		// ProfileSetDisplayMode()
-		// TODO: need to change this better way 
-		if (gMicroProfiler != bPrevToggleMicroProfiler)
-		{
-		  Profile& S = *ProfileGet();
-		  int nValue = gMicroProfiler ? 1 : 0;
-		  nValue = nValue >= 0 && nValue < P_DRAW_SIZE ? nValue : S.nDisplay;
-		  S.nDisplay = nValue;
-
-		  bPrevToggleMicroProfiler = gMicroProfiler;
-		}
 
 		gAppUI.Update(deltaTime);
+
+        ++nFrameCount;
 	}
 
 	void Draw()
 	{
+        PROFILER_SET_CPU_SCOPE("Cpu Profile", "draw", 0xffffff);
+
 		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &mFrameIdx);
 
 		FenceStatus fenceStatus = {};
@@ -1365,24 +1344,22 @@ public:
 			
 			cb.mFramesSinceCameraMove = mPathTracingData.mFrameIndex - mPathTracingData.mLastCameraMoveFrame;
 			
-			BufferUpdateDesc bufferUpdate;
-			bufferUpdate.pBuffer = pRayGenConfigBuffer[mFrameIdx];
-			bufferUpdate.pData = &cb;
-			bufferUpdate.mSize = sizeof(cb);
-			updateResource(&bufferUpdate);
+			BufferUpdateDesc bufferUpdate = { pRayGenConfigBuffer[mFrameIdx] };
+			beginUpdateResource(&bufferUpdate);
+			*(ShadersConfigBlock*)bufferUpdate.pMappedData = cb;
+			endUpdateResource(&bufferUpdate, NULL);
 			
 #if USE_DENOISER
-			DenoiserUniforms denoiserUniforms;
+			bufferUpdate = {};
+			bufferUpdate.pBuffer = pDenoiserInputsUniformBuffer[mFrameIdx];
+			beginUpdateResource(&bufferUpdate);
+			DenoiserUniforms& denoiserUniforms = *(DenoiserUniforms*)bufferUpdate.pMappedData;
 			denoiserUniforms.mWorldToCamera = viewMat;
 			denoiserUniforms.mCameraToProjection = projMat; // Unjittered since the depth/normal texture needs to be stable for the denoiser.
 			denoiserUniforms.mWorldToProjectionPrevious = mPathTracingData.mHistoryProjView;
 			denoiserUniforms.mRTInvSize = float2(1.0f / mSettings.mWidth, 1.0f / mSettings.mHeight);
 			denoiserUniforms.mFrameIndex = mPathTracingData.mFrameIndex;
-			
-			bufferUpdate.pBuffer = pDenoiserInputsUniformBuffer[mFrameIdx];
-			bufferUpdate.pData = &denoiserUniforms;
-			bufferUpdate.mSize = sizeof(denoiserUniforms);
-			updateResource(&bufferUpdate);
+			endUpdateResource(&bufferUpdate, NULL);
 #endif
 			
 			mPathTracingData.mHistoryProjView = projectView;
@@ -1393,20 +1370,20 @@ public:
 		
 		Cmd* pCmd = ppCmds[mFrameIdx];
 		beginCmd(pCmd);
-		cmdBeginGpuFrameProfile(pCmd, pGpuProfiler, true);
+		cmdBeginGpuFrameProfile(pCmd, gGpuProfileToken);
 		
 #if USE_DENOISER
 		if (pRaytracing != NULL)
 		{
 			RenderTarget* depthNormalTarget = pDepthNormalRenderTarget[mPathTracingData.mFrameIndex & 0x1];
 			
-			TextureBarrier barriers[] = {
-				{ pDepthRenderTarget->pTexture, RESOURCE_STATE_RENDER_TARGET },
-				{ depthNormalTarget->pTexture, RESOURCE_STATE_RENDER_TARGET },
-				{ pMotionVectorRenderTarget->pTexture, RESOURCE_STATE_RENDER_TARGET },
+			RenderTargetBarrier barriers[] = {
+				{ pDepthRenderTarget, RESOURCE_STATE_RENDER_TARGET },
+				{ depthNormalTarget, RESOURCE_STATE_RENDER_TARGET },
+				{ pMotionVectorRenderTarget, RESOURCE_STATE_RENDER_TARGET },
 			};
 			
-			cmdResourceBarrier(pCmd, 0, NULL, 3, barriers);
+			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 3, barriers);
 			
 			RenderTarget* denoiserRTs[] = { depthNormalTarget, pMotionVectorRenderTarget };
 			LoadActionsDesc loadActions = {};
@@ -1424,11 +1401,10 @@ public:
 			
 			cmdBindDescriptorSet(pCmd, mFrameIdx, pDenoiserInputsDescriptorSet);
 			
-			Buffer* pVertexBuffers[] = { SponzaProp.pPositionStream, SponzaProp.pNormalStream };
-			cmdBindVertexBuffer(pCmd, 2, pVertexBuffers, NULL);
+			cmdBindVertexBuffer(pCmd, 2, SponzaProp.pGeom->pVertexBuffers, SponzaProp.pGeom->mVertexStrides, NULL);
 			
-			cmdBindIndexBuffer(pCmd, SponzaProp.pIndicesStream, 0);
-			cmdDrawIndexed(pCmd, (uint32_t)SponzaProp.IndicesData.size(), 0, 0);
+			cmdBindIndexBuffer(pCmd, SponzaProp.pGeom->pIndexBuffer, 0, (IndexType)SponzaProp.pGeom->mIndexType);
+			cmdDrawIndexed(pCmd, SponzaProp.pGeom->mIndexCount, 0, 0);
 			
 			cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, 0, 0);
 			cmdEndGpuTimestampQuery(pCmd, pGpuProfiler);
@@ -1438,10 +1414,9 @@ public:
 		/************************************************************************/
 		// Transition UAV texture so raytracing shader can write to it
 		/************************************************************************/
-		cmdBeginGpuTimestampQuery(pCmd, pGpuProfiler, "Path Trace Scene", true);
+		cmdBeginGpuTimestampQuery(pCmd, gGpuProfileToken, "Path Trace Scene");
 		TextureBarrier uavBarrier = { pComputeOutput, RESOURCE_STATE_UNORDERED_ACCESS };
-		cmdResourceBarrier(pCmd, 0, NULL, 1, &uavBarrier);
-		
+		cmdResourceBarrier(pCmd, 0, NULL, 1, &uavBarrier, 0, NULL);
 		/************************************************************************/
 		// Perform raytracing
 		/************************************************************************/
@@ -1472,12 +1447,14 @@ public:
 		/************************************************************************/
 		// Transition UAV to be used as source and swapchain as destination in copy operation
 		/************************************************************************/
-		RenderTarget* pRenderTarget = pSwapChain->ppSwapchainRenderTargets[mFrameIdx];
+		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[mFrameIdx];
 		TextureBarrier copyBarriers[] = {
 			{ pComputeOutput, RESOURCE_STATE_SHADER_RESOURCE },
-			{ pRenderTarget->pTexture, RESOURCE_STATE_RENDER_TARGET },
 		};
-		cmdResourceBarrier(pCmd, 0, NULL, 2, copyBarriers);
+		RenderTargetBarrier rtCopyBarriers[] = {
+			{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
+		};
+		cmdResourceBarrier(pCmd, 0, NULL, 1, copyBarriers, 1, rtCopyBarriers);
 		
 		Texture* pathTracedTexture = pComputeOutput;
 #if USE_DENOISER
@@ -1495,13 +1472,13 @@ public:
 		removeResource(denoisedTexture);
 #endif
 		
-		cmdEndGpuTimestampQuery(pCmd, pGpuProfiler);
+		cmdEndGpuTimestampQuery(pCmd, gGpuProfileToken);
 		/************************************************************************/
 		// Present to screen
 		/************************************************************************/
 		LoadActionsDesc loadActions = {};
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
-		loadActions.mClearColorValues[0] = pSwapChain->mDesc.mColorClearValue;
+		loadActions.mClearColorValues[0] = pRenderTarget->mClearValue;
 		cmdBindRenderTargets(pCmd, 1, &pRenderTarget, NULL, &loadActions, NULL, NULL, -1, -1);
 		cmdSetViewport(pCmd, 0.0f, 0.0f, (float)mSettings.mWidth, (float)mSettings.mHeight, 0.0f, 1.0f);
 		cmdSetScissor(pCmd, 0, 0, mSettings.mWidth, mSettings.mHeight);
@@ -1511,47 +1488,54 @@ public:
 			/************************************************************************/
 			// Perform copy
 			/************************************************************************/
-			cmdBeginGpuTimestampQuery(pCmd, pGpuProfiler, "Render result", true);
+			cmdBeginGpuTimestampQuery(pCmd, gGpuProfileToken, "Render result");
 			// Draw computed results
 			cmdBindPipeline(pCmd, pDisplayTexturePipeline);
 			cmdBindDescriptorSet(pCmd, mFrameIdx, pDescriptorSetTexture);
 			cmdDraw(pCmd, 3, 0);
-			cmdEndGpuTimestampQuery(pCmd, pGpuProfiler);
+			cmdEndGpuTimestampQuery(pCmd, gGpuProfileToken);
         }
 
 		cmdBeginDebugMarker(pCmd, 0, 1, 0, "Draw UI");
-		static HiresTimer gTimer;
-		gTimer.GetUSec(true);
 		
-        TextDrawDesc frameTimeDraw = TextDrawDesc(0, 0xff0080ff, 18);
 		
 		gVirtualJoystick.Draw(pCmd, { 1.0f, 1.0f, 1.0f, 1.0f });
 		
-		gAppUI.DrawText(
-						pCmd, float2(8, 15), eastl::string().sprintf("CPU %f ms", gTimer.GetUSecAverage() / 1000.0f).c_str(), &frameTimeDraw);
-		
+        TextDrawDesc frameTimeDraw = TextDrawDesc(0, 0xff0080ff, 18);
+        cmdDrawCpuProfile(pCmd, float2(8.0f, 15.0f), &frameTimeDraw);
+
 #if !defined(__ANDROID__)
-		gAppUI.DrawText(
-						pCmd, float2(8, 40), eastl::string().sprintf("GPU %f ms", (float)pGpuProfiler->mCumulativeTime * 1000.0f).c_str(),
-						&frameTimeDraw);
-		gAppUI.DrawDebugGpuProfile(pCmd, float2(8, 65), pGpuProfiler, NULL);
+        cmdDrawGpuProfile(pCmd, float2(8, 40), gGpuProfileToken);
 #endif
 		
-		cmdDrawProfiler();
+		cmdDrawProfilerUI();
 		
 		gAppUI.Gui(pGuiWindow);
 		gAppUI.Draw(pCmd);
-		
 		cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
-		TextureBarrier presentBarrier = { pRenderTarget->pTexture, RESOURCE_STATE_PRESENT };
-		cmdResourceBarrier(pCmd, 0, NULL, 1, &presentBarrier);
+		RenderTargetBarrier presentBarrier = { pRenderTarget, RESOURCE_STATE_PRESENT };
+		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, &presentBarrier);
 
-		cmdEndGpuFrameProfile(pCmd, pGpuProfiler);
+		cmdEndGpuFrameProfile(pCmd, gGpuProfileToken);
 		
 		endCmd(pCmd);
-		queueSubmit(pQueue, 1, &pCmd, pRenderCompleteFences[mFrameIdx], 1, &pImageAcquiredSemaphore, 1, &pRenderCompleteSemaphores[mFrameIdx]);
-		queuePresent(pQueue, pSwapChain, mFrameIdx, 1, &pRenderCompleteSemaphores[mFrameIdx]);
+		QueueSubmitDesc submitDesc = {};
+		submitDesc.mCmdCount = 1;
+		submitDesc.mSignalSemaphoreCount = 1;
+		submitDesc.mWaitSemaphoreCount = 1;
+		submitDesc.ppCmds = &pCmd;
+		submitDesc.ppSignalSemaphores = &pRenderCompleteSemaphores[mFrameIdx];
+		submitDesc.ppWaitSemaphores = &pImageAcquiredSemaphore;
+		submitDesc.pSignalFence = pRenderCompleteFences[mFrameIdx];
+		queueSubmit(pQueue, &submitDesc);
+		QueuePresentDesc presentDesc = {};
+		presentDesc.mIndex = mFrameIdx;
+		presentDesc.mWaitSemaphoreCount = 1;
+		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphores[mFrameIdx];
+		presentDesc.pSwapChain = pSwapChain;
+		presentDesc.mSubmitDone = true;
+		queuePresent(pQueue, &presentDesc);
 		flipProfiler();
 		/************************************************************************/
 		/************************************************************************/
@@ -1567,8 +1551,12 @@ public:
 	/************************************************************************/
 private:
 	static const uint32_t   gImageCount = 3;
-  bool           bPrevToggleMicroProfiler = false;
 
+    uint32_t                nFrameCount = 0;
+    uint32_t                nBenchmarkFrames = 64;
+	bool					mBenchmark  = false;
+	char					mOutput[1024] = "\0";
+	
 	Renderer*			   pRenderer;
 	Raytracing*			 pRaytracing;
 	Queue*				  pQueue;
@@ -1581,7 +1569,6 @@ private:
 	Shader*	   pShaderClosestHit;
 	Shader*	   pShaderMiss;
 	Shader*	   pShaderMissShadow;
-    RasterizerState*        pRast;
     Shader*                 pDisplayTextureShader;
     Sampler*                pSampler;
 	Sampler*				pLinearSampler;
@@ -1597,23 +1584,20 @@ private:
 	Texture*				pComputeOutput;
 	Semaphore*				pRenderCompleteSemaphores[gImageCount];
 	Semaphore*				pImageAcquiredSemaphore;
-	GpuProfiler*			pGpuProfiler;
 	uint32_t				mFrameIdx = 0;
 	PathTracingData			mPathTracingData = {};
 	GuiComponent*			pGuiWindow;
 	float3					mLightDirection = float3(0.2f, 0.8f, 0.1f);
 
 #if USE_DENOISER
-	Buffer*				 	pDenoiserInputsUniformBuffer[gImageCount];
+	Buffer*					pDenoiserInputsUniformBuffer[gImageCount];
 	Texture*				pAlbedoTexture;
 	DescriptorSet*			pDenoiserInputsDescriptorSet;
 	RenderTarget*			pDepthNormalRenderTarget[2];
 	RenderTarget*			pMotionVectorRenderTarget;
 	RenderTarget*			pDepthRenderTarget;
-	RootSignature*		 	pDenoiserInputsRootSignature;
+	RootSignature*			pDenoiserInputsRootSignature;
 	Shader*		 			pDenoiserInputsShader;
-	DepthState*				pDenoiserDepthState;
-	RasterizerState* 		pDenoiserRasterState;
 	Pipeline*				pDenoiserInputsPipeline;
 	SSVGFDenoiser*			pDenoiser;
 #endif

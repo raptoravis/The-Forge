@@ -30,6 +30,7 @@
 //EASTL includes
 #include "../../../../Common_3/ThirdParty/OpenSource/EASTL/vector.h"
 #include "../../../../Common_3/ThirdParty/OpenSource/EASTL/string.h"
+#include "../../../../Common_3/ThirdParty/OpenSource/EASTL/unordered_map.h"
 
 //Interfaces
 #include "../../../../Common_3/OS/Interfaces/ICameraController.h"
@@ -40,7 +41,7 @@
 #include "../../../../Common_3/OS/Interfaces/IInput.h"
 #include "../../../../Common_3/Renderer/IRenderer.h"
 #include "../../../../Common_3/OS/Interfaces/IApp.h"
-#include "../../../../Common_3/Renderer/ResourceLoader.h"
+#include "../../../../Common_3/Renderer/IResourceLoader.h"
 
 //Math
 #include "../../../../Common_3/OS/Math/MathTypes.h"
@@ -48,15 +49,9 @@
 //ui
 #include "../../../../Middleware_3/UI/AppUI.h"
 
-//input
-//asimp importer
-#include "../../../../Common_3/Tools/AssimpImporter/AssimpImporter.h"
 #include "../../../../Common_3/OS/Interfaces/IMemory.h"
 
-const float gTimeScale = 0.2f;
-
 Timer      gAccumTimer;
-HiresTimer gTimer;
 
 struct AABBox
 {
@@ -114,8 +109,6 @@ struct BVHNode
 };
 
 const uint32_t gImageCount = 3;
-bool           gMicroProfiler = false;
-bool           bPrevToggleMicroProfiler = false;
 
 class RenderPassData
 {
@@ -130,10 +123,14 @@ class RenderPassData
 	eastl::vector<RenderTarget*> RenderTargets;
 	eastl::vector<Texture*>      Textures;
 
-	RenderPassData(Renderer* pRenderer, Queue* bGraphicsQueue, int ImageCount)
+	RenderPassData(Renderer* pRenderer, Queue* pGraphicsQueue, int ImageCount)
 	{
-		addCmdPool(pRenderer, bGraphicsQueue, false, &pCmdPool);
-		addCmd_n(pCmdPool, false, ImageCount, &ppCmds);
+		CmdPoolDesc cmdPoolDesc = {};
+		cmdPoolDesc.pQueue = pGraphicsQueue;
+		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
+		CmdDesc cmdDesc = {};
+		cmdDesc.pPool = pCmdPool;
+		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
 	}
 };
 
@@ -219,7 +216,7 @@ struct GBufferRT
 struct PropData
 {
 	mat4                        WorldMatrix;
-	eastl::vector<MeshBatch*>   MeshBatches;
+	Geometry*                   Geom;
 	Buffer*                     pConstantBuffer;
 };
 
@@ -230,10 +227,6 @@ Queue*    pGraphicsQueue = NULL;
 
 Sampler* pSamplerPointClamp = NULL;
 Sampler* pSamplerLinearWrap = NULL;
-
-RasterizerState* pRasterDefault = NULL;
-DepthState*      pDepthDefault = NULL;
-DepthState*      pDepthNone = NULL;
 
 Fence*     pRenderCompleteFences[gImageCount] = { NULL };
 Semaphore* pImageAcquiredSemaphore = NULL;
@@ -254,14 +247,26 @@ uint32_t gFrameIndex = 0;
 
 UIApp              gAppUI;
 GuiComponent*      pGuiWindow = NULL;
-GpuProfiler*       pGpuProfiler = NULL;
 ICameraController* pCameraController = NULL;
 
 float gLightRotationX = 0.0f;
 float gLightRotationZ = 0.0f;
 
+// Create vertex layout for g-prepass
+VertexLayout gVertexLayoutGPrepass = {};
+
+uint32_t gMaterialIds[] =
+{
+	0, 3, 1, 4, 5, 6, 7, 8, 6, 9, 7, 6, 10, 5, 7, 5, 6,
+	7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7, 6, 7,
+	6, 5, 6, 5, 11, 5, 11, 5, 11, 5, 10, 5, 9, 8, 6, 12,
+	2, 5, 13, 0, 14, 15, 16, 14, 15, 14, 16, 15, 13, 17, 18,
+	19, 18, 19, 18, 17, 19, 18, 17, 20, 21, 20, 21, 20, 21, 20,
+	21, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 22, 23, 4, 23, 4, 5, 24, 5,
+};
+
 //Sponza
-const char*           gModel_Sponza_File = "sponza.obj";
+const char*           gModel_Sponza_File = "Sponza.gltf";
 
 const char* pMaterialImageFileNames[] = {
 	"SponzaPBR_Textures/ao",
@@ -418,29 +423,30 @@ AABBox gWholeSceneBBox;
 RenderTarget* pDepthBuffer = NULL;
 
 TextDrawDesc gFrameTimeDraw = TextDrawDesc(0, 0xff00ffff, 18);
+ProfileToken gGpuProfileToken;
 
 uint gFrameNumber = 0;
 
 void addPropToPrimitivesAABBList(eastl::vector<AABBox>& bboxData, PropData& prop)
 {
 	mat4& world = prop.WorldMatrix;
-
-	for (MeshBatch* mesh : prop.MeshBatches)
 	{
 		//number of indices
-		uint noofIndices = mesh->NoofIndices;
+		uint noofIndices = prop.Geom->mIndexCount;
+		uint32_t* indices = (uint32_t*)prop.Geom->pShadow->pIndices;
+		float3* positions = (float3*)prop.Geom->pShadow->pAttributes[SEMANTIC_POSITION];
 
 		for (uint j = 0; j < noofIndices; j += 3)
 		{
 			AABBox bbox;
 
-			int index0 = mesh->IndicesData[j + 0];
-			int index1 = mesh->IndicesData[j + 1];
-			int index2 = mesh->IndicesData[j + 2];
+			int index0 = indices[j + 0];
+			int index1 = indices[j + 1];
+			int index2 = indices[j + 2];
 
-			bbox.Vertex0 = (world * vec4(f3Tov3(mesh->PositionsData[index0]), 1)).getXYZ();
-			bbox.Vertex1 = (world * vec4(f3Tov3(mesh->PositionsData[index1]), 1)).getXYZ();
-			bbox.Vertex2 = (world * vec4(f3Tov3(mesh->PositionsData[index2]), 1)).getXYZ();
+			bbox.Vertex0 = (world * vec4(f3Tov3(positions[index0]), 1)).getXYZ();
+			bbox.Vertex1 = (world * vec4(f3Tov3(positions[index1]), 1)).getXYZ();
+			bbox.Vertex2 = (world * vec4(f3Tov3(positions[index2]), 1)).getXYZ();
 
 			bbox.Expand(bbox.Vertex0);
 			bbox.Expand(bbox.Vertex1);
@@ -633,7 +639,7 @@ void findBestSplit(eastl::vector<AABBox>& bboxData, int begin, int end, int& spl
 {
 	int count = end - begin + 1;
 	int bestSplit = begin;
-	int globalBestSplit = begin;
+	//int globalBestSplit = begin;
 	splitCost = FLT_MAX;
 
 	split = begin;
@@ -842,19 +848,18 @@ class HybridRaytracing: public IApp
 	bool Init()
 	{
         // FILE PATHS
-        PathHandle programDirectory = fsCopyProgramDirectoryPath();
-		FileSystem *fileSystem = fsGetPathFileSystem(programDirectory);
+        PathHandle programDirectory = fsGetApplicationDirectory();
 		if (!fsPlatformUsesBundledResources())
 		{
 			PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/09a_HybridRaytracing");
-			fsSetResourceDirectoryRootPath(resourceDirRoot);
+			fsSetResourceDirRootPath(resourceDirRoot);
 			
-			fsSetRelativePathForResourceDirectory(RD_TEXTURES,        "../../../../Art/Sponza/Textures");
-			fsSetRelativePathForResourceDirectory(RD_MESHES,          "../../../../Art/Sponza/Meshes");
-			fsSetRelativePathForResourceDirectory(RD_BUILTIN_FONTS,    "../../UnitTestResources/Fonts");
-			fsSetRelativePathForResourceDirectory(RD_ANIMATIONS,      "../../UnitTestResources/Animation");
-			fsSetRelativePathForResourceDirectory(RD_MIDDLEWARE_TEXT,  "../../../../Middleware_3/Text");
-			fsSetRelativePathForResourceDirectory(RD_MIDDLEWARE_UI,    "../../../../Middleware_3/UI");
+			fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../../../Art/Sponza/Textures");
+			fsSetRelativePathForResourceDirEnum(RD_MESHES,          "../../../../Art/Sponza/Meshes");
+			fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,    "../../UnitTestResources/Fonts");
+			fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,      "../../UnitTestResources/Animation");
+			fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,  "../../../../Middleware_3/Text");
+			fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,    "../../../../Middleware_3/UI");
 		}
 		
 		// window and renderer setup
@@ -866,7 +871,8 @@ class HybridRaytracing: public IApp
 			return false;
 
 		QueueDesc queueDesc = {};
-		queueDesc.mType = CMD_POOL_DIRECT;
+		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
+        queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
 
 		//Add rendering passes
@@ -907,7 +913,7 @@ class HybridRaytracing: public IApp
     gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
 
 		initProfiler();
-		addGpuProfiler(pRenderer, pGraphicsQueue, &pGpuProfiler, "GpuProfiler");
+        gGpuProfileToken = addGpuProfiler(pRenderer, pGraphicsQueue, "Graphics");
 
 		//Load shaders
 		{
@@ -946,27 +952,6 @@ class HybridRaytracing: public IApp
 			copyShader.mStages[0] = { "display.vert", NULL, 0, RD_SHADER_SOURCES };
 			copyShader.mStages[1] = { "display.frag", NULL, 0, RD_SHADER_SOURCES };
 			addShader(pRenderer, &copyShader, &RenderPasses[RenderPass::CopyToBackbuffer]->pShader);
-		}
-
-		//Create rasteriser state objects
-		{
-			RasterizerStateDesc rasterizerStateDesc = {};
-			rasterizerStateDesc.mCullMode = CULL_MODE_NONE;
-			addRasterizerState(pRenderer, &rasterizerStateDesc, &pRasterDefault);
-		}
-
-		//Create depth state objects
-		{
-			DepthStateDesc depthStateDesc = {};
-			depthStateDesc.mDepthTest = true;
-			depthStateDesc.mDepthWrite = true;
-			depthStateDesc.mDepthFunc = CMP_LEQUAL;
-			addDepthState(pRenderer, &depthStateDesc, &pDepthDefault);
-
-			depthStateDesc.mDepthTest = false;
-			depthStateDesc.mDepthWrite = false;
-			depthStateDesc.mDepthFunc = CMP_ALWAYS;
-			addDepthState(pRenderer, &depthStateDesc, &pDepthNone);
 		}
 
 		//Create sampler state objects
@@ -1067,7 +1052,7 @@ class HybridRaytracing: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &RenderPasses[RenderPass::GBuffer]->pPerPassCB[i];
-			addResource(&ubDesc);
+			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 		}
 	}
 
@@ -1082,7 +1067,7 @@ class HybridRaytracing: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &RenderPasses[RenderPass::RaytracedShadows]->pPerPassCB[i];
-			addResource(&ubDesc);
+			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 		}
 	}
 
@@ -1097,7 +1082,7 @@ class HybridRaytracing: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &RenderPasses[RenderPass::Lighting]->pPerPassCB[i];
-			addResource(&ubDesc);
+			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 		}
 	}
 
@@ -1112,12 +1097,10 @@ class HybridRaytracing: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &RenderPasses[RenderPass::Composite]->pPerPassCB[i];
-			addResource(&ubDesc);
+			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 		}
 	}
 }
-
-
 
 if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
 	return false;
@@ -1128,7 +1111,6 @@ guiDesc.mStartPosition = vec2(5, 200.0f) / dpiScale;
 guiDesc.mStartSize = vec2(450, 600) / dpiScale;
 pGuiWindow = gAppUI.AddGuiComponent(GetName(), &guiDesc);
 
-pGuiWindow->AddWidget(CheckboxWidget("Toggle Micro Profiler", &gMicroProfiler));
 pGuiWindow->AddWidget(SliderFloatWidget("Light Rotation X", &gLightRotationX, (float)-M_PI, (float)M_PI));
 pGuiWindow->AddWidget(SliderFloatWidget("Light Rotation Z", &gLightRotationZ, (float)-M_PI, (float)M_PI));
 
@@ -1140,8 +1122,11 @@ pCameraController = createFpsCameraController(camPos, lookAt);
 
 pCameraController->setMotionParameters(cmp);
 
-if (!LoadSponza())
+SyncToken token = {};
+if (!LoadSponza(&token))
 	return false;
+
+waitForToken(&token);
 
 CreateBVHBuffers();
 
@@ -1166,7 +1151,7 @@ addInputAction(&actionDesc);
 typedef bool (*CameraInputHandler)(InputActionContext* ctx, uint32_t index);
 static CameraInputHandler onCameraInput = [](InputActionContext* ctx, uint32_t index)
 {
-	if (!gMicroProfiler && !gAppUI.IsFocused() && *ctx->pCaptured)
+	if (!gAppUI.IsFocused() && *ctx->pCaptured)
 	{
 		gVirtualJoystick.OnMove(index, ctx->mPhase != INPUT_ACTION_PHASE_CANCELED, ctx->pPosition);
 		index ? pCameraController->onRotate(ctx->mFloat2) : pCameraController->onMove(ctx->mFloat2);
@@ -1181,7 +1166,7 @@ actionDesc = { InputBindings::BUTTON_NORTH, [](InputActionContext* ctx) { pCamer
 addInputAction(&actionDesc);
 
 #ifdef TARGET_IOS
-	DescriptorSetDesc setDesc = { RenderPasses[RenderPass::GBuffer]->pRootSignature, DESCRIPTOR_UPDATE_FREQ_PER_DRAW, (uint32_t)SponzaProp.MeshBatches.size() };
+	DescriptorSetDesc setDesc = { RenderPasses[RenderPass::GBuffer]->pRootSignature, DESCRIPTOR_UPDATE_FREQ_PER_DRAW, (uint32_t)SponzaProp.Geom->mDrawArgCount };
 	addDescriptorSet(pRenderer, &setDesc, &RenderPasses[RenderPass::GBuffer]->pDescriptorSets[2]);
 #endif
 
@@ -1212,10 +1197,6 @@ void Exit()
 	removeSampler(pRenderer, pSamplerLinearWrap);
 	removeSampler(pRenderer, pSamplerPointClamp);
 
-	removeRasterizerState(pRasterDefault);
-	removeDepthState(pDepthDefault);
-	removeDepthState(pDepthNone);
-
 	//Delete rendering passes
 	for (RenderPassMap::iterator iter = RenderPasses.begin(); iter != RenderPasses.end(); ++iter)
 	{
@@ -1244,7 +1225,7 @@ void Exit()
 				removeResource(pass->pPerPassCB[j]);
 		}
 
-		removeCmd_n(pass->pCmdPool, gImageCount, pass->ppCmds);
+		removeCmd_n(pRenderer, gImageCount, pass->ppCmds);
 		removeCmdPool(pRenderer, pass->pCmdPool);
 
 		removeShader(pRenderer, pass->pShader);
@@ -1259,27 +1240,16 @@ void Exit()
 	gSponzaTextureIndexforMaterial.set_capacity(0);
 
 	//Delete Sponza resources
-	for (MeshBatch* meshBatch : SponzaProp.MeshBatches)
-	{
-		removeResource(meshBatch->pIndicesStream);
-		removeResource(meshBatch->pNormalStream);
-		removeResource(meshBatch->pPositionStream);
-		removeResource(meshBatch->pUVStream);
-		meshBatch->~MeshBatch();
-		conf_free(meshBatch);
-	}
-
+	removeResource(SponzaProp.Geom);
 	removeResource(SponzaProp.pConstantBuffer);
-	SponzaProp.MeshBatches.set_capacity(0);
 
 	for (uint i = 0; i < TOTAL_IMGS; ++i)
 		removeResource(pMaterialTextures[i]);
 
 	removeResource(BVHBoundingBoxesBuffer);
 
-	removeGpuProfiler(pRenderer, pGpuProfiler);
-	removeResourceLoaderInterface(pRenderer);
-	removeQueue(pGraphicsQueue);
+    exitResourceLoaderInterface(pRenderer);
+	removeQueue(pRenderer, pGraphicsQueue);
 	removeRenderer(pRenderer);
 }
 
@@ -1287,7 +1257,6 @@ void AssignSponzaTextures()
 {
 	int AO = 5;
 	int NoMetallic = 6;
-	int Metallic = 7;
 
 	//00 : leaf
 	gSponzaTextureIndexforMaterial.push_back(66);
@@ -1303,25 +1272,25 @@ void AssignSponzaTextures()
 	gSponzaTextureIndexforMaterial.push_back(80);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	//02 : Material__57 (Plant)
+	// 02 : 16___Default (gi_flag)
+	gSponzaTextureIndexforMaterial.push_back(8);
+	gSponzaTextureIndexforMaterial.push_back(8);    // !!!!!!
+	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexforMaterial.push_back(8);    // !!!!!
+	gSponzaTextureIndexforMaterial.push_back(AO);
+
+	//03 : Material__57 (Plant)
 	gSponzaTextureIndexforMaterial.push_back(75);
 	gSponzaTextureIndexforMaterial.push_back(76);
 	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
 	gSponzaTextureIndexforMaterial.push_back(77);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 03 : Material__298
+	// 04 : Material__298
 	gSponzaTextureIndexforMaterial.push_back(9);
 	gSponzaTextureIndexforMaterial.push_back(10);
 	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
 	gSponzaTextureIndexforMaterial.push_back(11);
-	gSponzaTextureIndexforMaterial.push_back(AO);
-
-	// 04 : 16___Default (gi_flag)
-	gSponzaTextureIndexforMaterial.push_back(8);
-	gSponzaTextureIndexforMaterial.push_back(8);    // !!!!!!
-	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
-	gSponzaTextureIndexforMaterial.push_back(8);    // !!!!!
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
 	// 05 : bricks
@@ -1380,192 +1349,146 @@ void AssignSponzaTextures()
 	gSponzaTextureIndexforMaterial.push_back(33);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 13 : Material__47 - it seems missing
-	gSponzaTextureIndexforMaterial.push_back(19);
-	gSponzaTextureIndexforMaterial.push_back(20);
-	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
-	gSponzaTextureIndexforMaterial.push_back(21);
-	gSponzaTextureIndexforMaterial.push_back(AO);
-
-	// 14 : flagpole
+	// 13 : flagpole
 	gSponzaTextureIndexforMaterial.push_back(57);
 	gSponzaTextureIndexforMaterial.push_back(58);
 	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
 	gSponzaTextureIndexforMaterial.push_back(59);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 15 : fabric_e (green)
+	// 14 : fabric_e (green)
 	gSponzaTextureIndexforMaterial.push_back(51);
 	gSponzaTextureIndexforMaterial.push_back(52);
 	gSponzaTextureIndexforMaterial.push_back(53);
 	gSponzaTextureIndexforMaterial.push_back(54);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 16 : fabric_d (blue)
+	// 15 : fabric_d (blue)
 	gSponzaTextureIndexforMaterial.push_back(49);
 	gSponzaTextureIndexforMaterial.push_back(50);
 	gSponzaTextureIndexforMaterial.push_back(53);
 	gSponzaTextureIndexforMaterial.push_back(54);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 17 : fabric_a (red)
+	// 16 : fabric_a (red)
 	gSponzaTextureIndexforMaterial.push_back(55);
 	gSponzaTextureIndexforMaterial.push_back(56);
 	gSponzaTextureIndexforMaterial.push_back(53);
 	gSponzaTextureIndexforMaterial.push_back(54);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 18 : fabric_g (curtain_blue)
+	// 17 : fabric_g (curtain_blue)
 	gSponzaTextureIndexforMaterial.push_back(37);
 	gSponzaTextureIndexforMaterial.push_back(38);
 	gSponzaTextureIndexforMaterial.push_back(43);
 	gSponzaTextureIndexforMaterial.push_back(44);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 19 : fabric_c (curtain_red)
+	// 18 : fabric_c (curtain_red)
 	gSponzaTextureIndexforMaterial.push_back(41);
 	gSponzaTextureIndexforMaterial.push_back(42);
 	gSponzaTextureIndexforMaterial.push_back(43);
 	gSponzaTextureIndexforMaterial.push_back(44);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 20 : fabric_f (curtain_green)
+	// 19 : fabric_f (curtain_green)
 	gSponzaTextureIndexforMaterial.push_back(39);
 	gSponzaTextureIndexforMaterial.push_back(40);
 	gSponzaTextureIndexforMaterial.push_back(43);
 	gSponzaTextureIndexforMaterial.push_back(44);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 21 : chain
+	// 20 : chain
 	gSponzaTextureIndexforMaterial.push_back(12);
 	gSponzaTextureIndexforMaterial.push_back(14);
 	gSponzaTextureIndexforMaterial.push_back(13);
 	gSponzaTextureIndexforMaterial.push_back(15);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 22 : vase_hanging
+	// 21 : vase_hanging
 	gSponzaTextureIndexforMaterial.push_back(72);
 	gSponzaTextureIndexforMaterial.push_back(73);
 	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
 	gSponzaTextureIndexforMaterial.push_back(74);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 23 : vase
+	// 22 : vase
 	gSponzaTextureIndexforMaterial.push_back(69);
 	gSponzaTextureIndexforMaterial.push_back(70);
 	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
 	gSponzaTextureIndexforMaterial.push_back(71);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 24 : Material__25 (lion)
+	// 23 : Material__25 (lion)
 	gSponzaTextureIndexforMaterial.push_back(16);
 	gSponzaTextureIndexforMaterial.push_back(17);
 	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
 	gSponzaTextureIndexforMaterial.push_back(18);
 	gSponzaTextureIndexforMaterial.push_back(AO);
 
-	// 25 : roof
+	// 24 : roof
 	gSponzaTextureIndexforMaterial.push_back(63);
 	gSponzaTextureIndexforMaterial.push_back(64);
 	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
 	gSponzaTextureIndexforMaterial.push_back(65);
 	gSponzaTextureIndexforMaterial.push_back(AO);
+
+	// 25 : Material__47 - it seems missing
+	gSponzaTextureIndexforMaterial.push_back(19);
+	gSponzaTextureIndexforMaterial.push_back(20);
+	gSponzaTextureIndexforMaterial.push_back(NoMetallic);
+	gSponzaTextureIndexforMaterial.push_back(21);
+	gSponzaTextureIndexforMaterial.push_back(AO);
 }
 
 //Loads sponza textures and Sponza mesh
-bool LoadSponza()
+bool LoadSponza(SyncToken* token)
 {
 	//load Sponza
 	//eastl::vector<Image> toLoad(TOTAL_IMGS);
 	//adding material textures
 	for (int i = 0; i < TOTAL_IMGS; ++i)
 	{
-        PathHandle texturePath = fsCopyPathInResourceDirectory(RD_TEXTURES, pMaterialImageFileNames[i]);
+        PathHandle texturePath = fsGetPathInResourceDirEnum(RD_TEXTURES, pMaterialImageFileNames[i]);
 		TextureLoadDesc textureDesc = {};
 		textureDesc.pFilePath = texturePath;
 		textureDesc.ppTexture = &pMaterialTextures[i];
-		addResource(&textureDesc, true);
+		addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
 	}
 
-	AssimpImporter importer;
-
-    AssimpImporter::Model gModel_Sponza;
-    PathHandle sceneFullPath = fsCopyPathInResourceDirectory(RD_MESHES, gModel_Sponza_File);
-	if (!importer.ImportModel(sceneFullPath, &gModel_Sponza))
 	{
-		LOGF(LogLevel::eERROR, "Failed to load %s", fsGetPathFileName(sceneFullPath).buffer);
-		finishResourceLoading();
-		return false;
-	}
+		gVertexLayoutGPrepass.mAttribCount = 3;
 
-	size_t meshCount = gModel_Sponza.mMeshArray.size();
-	size_t sponza_matCount = gModel_Sponza.mMaterialList.size();
+		gVertexLayoutGPrepass.mAttribs[0].mSemantic = SEMANTIC_POSITION;
+		gVertexLayoutGPrepass.mAttribs[0].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
+		gVertexLayoutGPrepass.mAttribs[0].mBinding = 0;
+		gVertexLayoutGPrepass.mAttribs[0].mLocation = 0;
+		gVertexLayoutGPrepass.mAttribs[0].mOffset = 0;
+
+		//normals
+		gVertexLayoutGPrepass.mAttribs[1].mSemantic = SEMANTIC_NORMAL;
+		gVertexLayoutGPrepass.mAttribs[1].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
+		gVertexLayoutGPrepass.mAttribs[1].mLocation = 1;
+		gVertexLayoutGPrepass.mAttribs[1].mBinding = 1;
+		gVertexLayoutGPrepass.mAttribs[1].mOffset = 0;
+
+		//texture
+		gVertexLayoutGPrepass.mAttribs[2].mSemantic = SEMANTIC_TEXCOORD0;
+		gVertexLayoutGPrepass.mAttribs[2].mFormat = TinyImageFormat_R32G32_SFLOAT;
+		gVertexLayoutGPrepass.mAttribs[2].mLocation = 2;
+		gVertexLayoutGPrepass.mAttribs[2].mBinding = 2;
+		gVertexLayoutGPrepass.mAttribs[2].mOffset = 0;
+	}
 
 	SponzaProp.WorldMatrix = mat4::identity();
 
-	for (int i = 0; i < meshCount; i++)
-	{
-		//skip the large cloth mid-scene
-		if (i == 4)
-			continue;
-
-		AssimpImporter::Mesh subMesh = gModel_Sponza.mMeshArray[i];
-
-		MeshBatch* pMeshBatch = (MeshBatch*)conf_placement_new<MeshBatch>(conf_calloc(1, sizeof(MeshBatch)));
-
-		SponzaProp.MeshBatches.push_back(pMeshBatch);
-
-		pMeshBatch->MaterialID = subMesh.mMaterialId;
-		pMeshBatch->NoofIndices = (int)subMesh.mIndices.size();
-		pMeshBatch->NoofVertices = (int)subMesh.mPositions.size();
-
-		for (int j = 0; j < pMeshBatch->NoofIndices; j++)
-		{
-			pMeshBatch->IndicesData.push_back(subMesh.mIndices[j]);
-		}
-
-		for (int j = 0; j < pMeshBatch->NoofVertices; j++)
-		{
-			pMeshBatch->PositionsData.push_back(subMesh.mPositions[j]);
-		}
-
-		// Vertex buffers for sponza
-		{
-			BufferLoadDesc desc = {};
-			desc.mDesc.mDescriptors = DESCRIPTOR_TYPE_VERTEX_BUFFER;
-			desc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
-			desc.mDesc.mVertexStride = sizeof(float3);
-			desc.mDesc.mSize = subMesh.mPositions.size() * desc.mDesc.mVertexStride;
-			desc.pData = subMesh.mPositions.data();
-			desc.ppBuffer = &pMeshBatch->pPositionStream;
-			addResource(&desc);
-
-			desc.mDesc.mVertexStride = sizeof(float3);
-			desc.mDesc.mSize = subMesh.mNormals.size() * desc.mDesc.mVertexStride;
-			desc.pData = subMesh.mNormals.data();
-			desc.ppBuffer = &pMeshBatch->pNormalStream;
-			addResource(&desc);
-
-			desc.mDesc.mVertexStride = sizeof(float2);
-			desc.mDesc.mSize = subMesh.mUvs.size() * desc.mDesc.mVertexStride;
-			desc.pData = subMesh.mUvs.data();
-			desc.ppBuffer = &pMeshBatch->pUVStream;
-			addResource(&desc);
-		}
-
-		// Index buffer for sponza
-		{
-			// Index buffer for the scene
-			BufferLoadDesc desc = {};
-			desc.mDesc.mDescriptors = DESCRIPTOR_TYPE_INDEX_BUFFER;
-			desc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
-			desc.mDesc.mIndexType = INDEX_TYPE_UINT32;
-			desc.mDesc.mSize = sizeof(uint) * (uint)subMesh.mIndices.size();
-			desc.pData = subMesh.mIndices.data();
-			desc.ppBuffer = &pMeshBatch->pIndicesStream;
-			addResource(&desc);
-		}
-	}
+    PathHandle sceneFullPath = fsGetPathInResourceDirEnum(RD_MESHES, gModel_Sponza_File);
+	GeometryLoadDesc loadDesc = {};
+	loadDesc.pFilePath = sceneFullPath;
+	loadDesc.ppGeometry = &SponzaProp.Geom;
+	loadDesc.pVertexLayout = &gVertexLayoutGPrepass;
+	loadDesc.mFlags = GEOMETRY_LOAD_FLAG_SHADOWED;
+	addResource(&loadDesc, token, LOAD_PRIORITY_HIGH);
 
 	//set constant buffer for sponza
 	{
@@ -1579,11 +1502,11 @@ bool LoadSponza()
 		desc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
 		desc.pData = &data;
 		desc.ppBuffer = &SponzaProp.pConstantBuffer;
-		addResource(&desc);
+		addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
 	}
 
 	AssignSponzaTextures();
-	finishResourceLoading();
+
 	return true;
 }
 
@@ -1595,6 +1518,8 @@ void CreateBVHBuffers()
 	//create buffers for BVH
 
 	addPropToPrimitivesAABBList(triBBoxes, SponzaProp);
+
+	conf_free(SponzaProp.Geom->pShadow);
 
 	int count = (int)triBBoxes.size();
 	//BVHNode* bvhRoot = createBVHNode(triBBoxes, 0, count-1);
@@ -1614,6 +1539,7 @@ void CreateBVHBuffers()
 	bbox->MinBounds.w = 0;
 	dataOffset += sizeof(BVHNodeBBox);
 
+	SyncToken token = {};
 	BufferLoadDesc desc = {};
 	desc.mDesc.mFormat = TinyImageFormat_R32G32B32A32_SFLOAT;
 	desc.mDesc.mDescriptors = DESCRIPTOR_TYPE_BUFFER;
@@ -1624,8 +1550,8 @@ void CreateBVHBuffers()
 	desc.mDesc.mStructStride = sizeof(float4);
 	desc.pData = bvhTreeNodes;
 	desc.ppBuffer = &BVHBoundingBoxesBuffer;
-	addResource(&desc);
-
+	addResource(&desc, &token, LOAD_PRIORITY_HIGH);
+	waitForToken(&token);
 	conf_free(bvhTreeNodes);
 	deleteBVHTree(bvhRoot);
 }
@@ -1634,7 +1560,7 @@ void CreateRenderTargets()
 {
 	//Create rendertargets
 	{
-		ClearValue colorClearBlack = { 0.0f, 0.0f, 0.0f, 0.0f };
+		ClearValue colorClearBlack = {{0.0f, 0.0f, 0.0f, 0.0f}};
 
 		// Add G-buffer render targets
 		{
@@ -1667,7 +1593,7 @@ void CreateRenderTargets()
 		{
 			RenderTargetDesc depthRT = {};
 			depthRT.mArraySize = 1;
-			depthRT.mClearValue = { 1.0f, 0 };
+			depthRT.mClearValue = {{1.0f, 0}};
 			depthRT.mDepth = 1;
 			depthRT.mFormat = TinyImageFormat_D32_SFLOAT;
 			depthRT.mHeight = mSettings.mHeight;
@@ -1696,7 +1622,7 @@ void CreateRenderTargets()
 
 			Texture* pTexture;
 			textureDesc.ppTexture = &pTexture;
-			addResource(&textureDesc);
+			addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
 
 			RenderPasses[RenderPass::RaytracedShadows]->Textures.push_back(pTexture);
 		}
@@ -1719,7 +1645,7 @@ void CreateRenderTargets()
 
 			Texture* pTexture;
 			textureDesc.ppTexture = &pTexture;
-			addResource(&textureDesc);
+			addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
 
 			RenderPasses[RenderPass::Lighting]->Textures.push_back(pTexture);
 		}
@@ -1742,7 +1668,7 @@ void CreateRenderTargets()
 
 			Texture* pTexture;
 			textureDesc.ppTexture = &pTexture;
-			addResource(&textureDesc);
+			addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
 
 			RenderPasses[RenderPass::Composite]->Textures.push_back(pTexture);
 		}
@@ -1754,44 +1680,33 @@ bool Load()
 	if (!addSwapChain())
 		return false;
 
-	if (!gAppUI.Load(pSwapChain->ppSwapchainRenderTargets))
+	if (!gAppUI.Load(pSwapChain->ppRenderTargets))
 		return false;
 
 	CreateRenderTargets();
 
+	//Create rasteriser state objects
+	RasterizerStateDesc rasterizerStateDesc = {};
+	rasterizerStateDesc.mCullMode = CULL_MODE_NONE;
+
+	//Create depth state objects
+	DepthStateDesc depthStateDesc = {};
+	depthStateDesc.mDepthTest = true;
+	depthStateDesc.mDepthWrite = true;
+	depthStateDesc.mDepthFunc = CMP_LEQUAL;
+
+	DepthStateDesc depthStateNoneDesc = {};
+	depthStateNoneDesc.mDepthTest = false;
+	depthStateNoneDesc.mDepthWrite = false;
+	depthStateNoneDesc.mDepthFunc = CMP_ALWAYS;
+
 	//add gbuffer pipeline
 	{
-		// Create vertex layout for g-prepass
-		VertexLayout vertexLayoutGPrepass = {};
-		{
-			vertexLayoutGPrepass.mAttribCount = 3;
-
-			vertexLayoutGPrepass.mAttribs[0].mSemantic = SEMANTIC_POSITION;
-			vertexLayoutGPrepass.mAttribs[0].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
-			vertexLayoutGPrepass.mAttribs[0].mBinding = 0;
-			vertexLayoutGPrepass.mAttribs[0].mLocation = 0;
-			vertexLayoutGPrepass.mAttribs[0].mOffset = 0;
-
-			//normals
-			vertexLayoutGPrepass.mAttribs[1].mSemantic = SEMANTIC_NORMAL;
-			vertexLayoutGPrepass.mAttribs[1].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
-			vertexLayoutGPrepass.mAttribs[1].mLocation = 1;
-			vertexLayoutGPrepass.mAttribs[1].mBinding = 1;
-			vertexLayoutGPrepass.mAttribs[1].mOffset = 0;
-
-			//texture
-			vertexLayoutGPrepass.mAttribs[2].mSemantic = SEMANTIC_TEXCOORD0;
-			vertexLayoutGPrepass.mAttribs[2].mFormat = TinyImageFormat_R32G32_SFLOAT;
-			vertexLayoutGPrepass.mAttribs[2].mLocation = 2;
-			vertexLayoutGPrepass.mAttribs[2].mBinding = 2;
-			vertexLayoutGPrepass.mAttribs[2].mOffset = 0;
-		}
-
 		//set up g-prepass buffer formats
 		TinyImageFormat deferredFormats[GBufferRT::Noof] = {};
 		for (uint32_t i = 0; i < GBufferRT::Noof; ++i)
 		{
-			deferredFormats[i] = RenderPasses[RenderPass::GBuffer]->RenderTargets[i]->mDesc.mFormat;
+			deferredFormats[i] = RenderPasses[RenderPass::GBuffer]->RenderTargets[i]->mFormat;
 		}
 
 		PipelineDesc desc = {};
@@ -1799,18 +1714,18 @@ bool Load()
 		GraphicsPipelineDesc& pipelineSettings = desc.mGraphicsDesc;
 		pipelineSettings.mPrimitiveTopo = PRIMITIVE_TOPO_TRI_LIST;
 		pipelineSettings.mRenderTargetCount = GBufferRT::Noof;
-		pipelineSettings.pDepthState = pDepthDefault;
+		pipelineSettings.pDepthState = &depthStateDesc;
 
 		pipelineSettings.pColorFormats = deferredFormats;
 
-		pipelineSettings.mSampleCount = RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mDesc.mSampleCount;
-		pipelineSettings.mSampleQuality = RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mDesc.mSampleQuality;
+		pipelineSettings.mSampleCount = RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mSampleCount;
+		pipelineSettings.mSampleQuality = RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mSampleQuality;
 
-		pipelineSettings.mDepthStencilFormat = pDepthBuffer->mDesc.mFormat;
+		pipelineSettings.mDepthStencilFormat = pDepthBuffer->mFormat;
 		pipelineSettings.pRootSignature = RenderPasses[RenderPass::GBuffer]->pRootSignature;
 		pipelineSettings.pShaderProgram = RenderPasses[RenderPass::GBuffer]->pShader;
-		pipelineSettings.pVertexLayout = &vertexLayoutGPrepass;
-		pipelineSettings.pRasterizerState = pRasterDefault;
+		pipelineSettings.pVertexLayout = &gVertexLayoutGPrepass;
+		pipelineSettings.pRasterizerState = &rasterizerStateDesc;
 
 		addPipeline(pRenderer, &desc, &RenderPasses[RenderPass::GBuffer]->pPipeline);
 	}
@@ -1855,13 +1770,13 @@ bool Load()
 		GraphicsPipelineDesc& pipelineSettings = desc.mGraphicsDesc;
 		pipelineSettings.mPrimitiveTopo = PRIMITIVE_TOPO_TRI_LIST;
 		pipelineSettings.mRenderTargetCount = 1;
-		pipelineSettings.pRasterizerState = pRasterDefault;
+		pipelineSettings.pRasterizerState = &rasterizerStateDesc;
 		pipelineSettings.pVertexLayout = &vertexLayout;
-		pipelineSettings.pDepthState = pDepthNone;
+		pipelineSettings.pDepthState = &depthStateNoneDesc;
 
-		pipelineSettings.pColorFormats = &pSwapChain->ppSwapchainRenderTargets[0]->mDesc.mFormat;
-		pipelineSettings.mSampleCount = pSwapChain->ppSwapchainRenderTargets[0]->mDesc.mSampleCount;
-		pipelineSettings.mSampleQuality = pSwapChain->ppSwapchainRenderTargets[0]->mDesc.mSampleQuality;
+		pipelineSettings.pColorFormats = &pSwapChain->ppRenderTargets[0]->mFormat;
+		pipelineSettings.mSampleCount = pSwapChain->ppRenderTargets[0]->mSampleCount;
+		pipelineSettings.mSampleQuality = pSwapChain->ppRenderTargets[0]->mSampleQuality;
 
 		pipelineSettings.pRootSignature = RenderPasses[RenderPass::CopyToBackbuffer]->pRootSignature;
 		pipelineSettings.pShaderProgram = RenderPasses[RenderPass::CopyToBackbuffer]->pShader;
@@ -1874,10 +1789,12 @@ bool Load()
 	pCameraController->moveTo(midpoint - vec3(1050, 350, 0));
 	pCameraController->lookAt(midpoint - vec3(0, 450, 0));
 
-	if (!gVirtualJoystick.Load(pSwapChain->ppSwapchainRenderTargets[0]))
+	if (!gVirtualJoystick.Load(pSwapChain->ppRenderTargets[0]))
 		return false;
 
-	loadProfiler(&gAppUI, mSettings.mWidth, mSettings.mHeight);
+	loadProfilerUI(&gAppUI, mSettings.mWidth, mSettings.mHeight);
+
+	waitForAllResourceLoads();
 
 	prepareDescriptorSets();
 
@@ -1888,7 +1805,7 @@ void Unload()
 {
 	waitQueueIdle(pGraphicsQueue);
 
-	unloadProfiler();
+	unloadProfilerUI();
 	gAppUI.Unload();
 
 	gVirtualJoystick.Unload();
@@ -1955,10 +1872,10 @@ void Update(float deltaTime)
 		gShadowPassUniformData.mProjectView = projectView;
 		gShadowPassUniformData.mInvProjectView = invProjectView;
 		gShadowPassUniformData.mRTSize = vec4(
-			(float)RenderPasses[RenderPass::RaytracedShadows]->Textures[0]->mDesc.mWidth,
-			(float)RenderPasses[RenderPass::RaytracedShadows]->Textures[0]->mDesc.mHeight,
-			1.0f / RenderPasses[RenderPass::RaytracedShadows]->Textures[0]->mDesc.mWidth,
-			1.0f / RenderPasses[RenderPass::RaytracedShadows]->Textures[0]->mDesc.mHeight);
+			(float)mSettings.mWidth,
+			(float)mSettings.mHeight,
+			1.0f / mSettings.mWidth,
+			1.0f / mSettings.mHeight);
 
 		gShadowPassUniformData.mLightDir = lightDir;
 
@@ -1973,29 +1890,23 @@ void Update(float deltaTime)
 		gLightPassUniformData.mProjectView = projectView;
 		gLightPassUniformData.mInvProjectView = invProjectView;
 		gLightPassUniformData.mRTSize = vec4(
-			(float)RenderPasses[RenderPass::Lighting]->Textures[0]->mDesc.mWidth,
-			(float)RenderPasses[RenderPass::Lighting]->Textures[0]->mDesc.mHeight,
-			1.0f / RenderPasses[RenderPass::Lighting]->Textures[0]->mDesc.mWidth,
-			1.0f / RenderPasses[RenderPass::Lighting]->Textures[0]->mDesc.mHeight);
+			(float)mSettings.mWidth,
+			(float)mSettings.mHeight,
+			1.0f / mSettings.mWidth,
+			1.0f / mSettings.mHeight);
 		gLightPassUniformData.mLightDir = lightDir;
 	}
 
 	//update Composite pass constant buffer
 	{
 		gDefaultPassUniformData.mRTSize = vec4(
-			(float)RenderPasses[RenderPass::Composite]->Textures[0]->mDesc.mWidth,
-			(float)RenderPasses[RenderPass::Composite]->Textures[0]->mDesc.mHeight,
-			1.0f / RenderPasses[RenderPass::Composite]->Textures[0]->mDesc.mWidth,
-			1.0f / RenderPasses[RenderPass::Composite]->Textures[0]->mDesc.mHeight);
+			(float)mSettings.mWidth,
+			(float)mSettings.mHeight,
+			1.0f / mSettings.mWidth,
+			1.0f / mSettings.mHeight);
 	}
 
 	gFrameNumber++;
-
-  if (gMicroProfiler != bPrevToggleMicroProfiler)
-  {
-    toggleProfiler();
-    bPrevToggleMicroProfiler = gMicroProfiler;
-  }
 
   /************************************************************************/
   gAppUI.Update(deltaTime);
@@ -2008,67 +1919,76 @@ void Draw()
 	/************************************************************************/
 	// Update uniform buffers
 	/************************************************************************/
-	BufferUpdateDesc desc = { RenderPasses[RenderPass::GBuffer]->pPerPassCB[gFrameIndex], &gPrepasUniformData };
-	updateResource(&desc);
+	BufferUpdateDesc desc = { RenderPasses[RenderPass::GBuffer]->pPerPassCB[gFrameIndex] };
+	beginUpdateResource(&desc);
+	*(GPrepassUniformBuffer*)desc.pMappedData = gPrepasUniformData;
+	endUpdateResource(&desc, NULL);
 
-	desc = { RenderPasses[RenderPass::RaytracedShadows]->pPerPassCB[gFrameIndex], &gShadowPassUniformData };
-	updateResource(&desc);
+	desc = { RenderPasses[RenderPass::RaytracedShadows]->pPerPassCB[gFrameIndex] };
+	beginUpdateResource(&desc);
+	*(ShadowpassUniformBuffer*)desc.pMappedData = gShadowPassUniformData;
+	endUpdateResource(&desc, NULL);
 
-	desc = { RenderPasses[RenderPass::Lighting]->pPerPassCB[gFrameIndex], &gLightPassUniformData };
-	updateResource(&desc);
+	desc = { RenderPasses[RenderPass::Lighting]->pPerPassCB[gFrameIndex] };
+	beginUpdateResource(&desc);
+	*(LightpassUniformBuffer*)desc.pMappedData = gLightPassUniformData;
+	endUpdateResource(&desc, NULL);
 
-	desc = { RenderPasses[RenderPass::Composite]->pPerPassCB[gFrameIndex], &gDefaultPassUniformData };
-	updateResource(&desc);
+	desc = { RenderPasses[RenderPass::Composite]->pPerPassCB[gFrameIndex] };
+	beginUpdateResource(&desc);
+	*(DefaultpassUniformBuffer*)desc.pMappedData = gDefaultPassUniformData;
+	endUpdateResource(&desc, NULL);
 	/************************************************************************/
 	// Rendering
 	/************************************************************************/
-	RenderTarget* pRenderTarget = pSwapChain->ppSwapchainRenderTargets[gFrameIndex];
+	RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[gFrameIndex];
 	Semaphore*    pRenderCompleteSemaphore = pRenderCompleteSemaphores[gFrameIndex];
 	Fence*        pRenderCompleteFence = pRenderCompleteFences[gFrameIndex];
+	FenceStatus   fenceStatus;
+	getFenceStatus(pRenderer, pRenderCompleteFence, &fenceStatus);
+	if (FENCE_STATUS_INCOMPLETE == fenceStatus)
+		waitForFences(pRenderer, 1, &pRenderCompleteFence);
 	// GPrepass *********************************************************************************
 	{
 		Cmd* cmd = RenderPasses[RenderPass::GBuffer]->ppCmds[gFrameIndex];
 		beginCmd(cmd);
 
-		cmdBeginGpuFrameProfile(cmd, pGpuProfiler);
+		cmdBeginGpuFrameProfile(cmd, gGpuProfileToken);
 
 		//Clear G-buffers and Depth buffer
 		LoadActionsDesc loadActions = {};
 		for (uint32_t i = 0; i < RenderPasses[RenderPass::GBuffer]->RenderTargets.size(); ++i)
 		{
 			loadActions.mLoadActionsColor[i] = LOAD_ACTION_CLEAR;
-			loadActions.mClearColorValues[i] = RenderPasses[RenderPass::GBuffer]->RenderTargets[i]->mDesc.mClearValue;
+			loadActions.mClearColorValues[i] = RenderPasses[RenderPass::GBuffer]->RenderTargets[i]->mClearValue;
 		}
 
 		// Clear depth to the far plane and stencil to 0
 		loadActions.mLoadActionDepth = LOAD_ACTION_CLEAR;
-		loadActions.mClearDepth = { 1.0f, 0.0f };
+		loadActions.mClearDepth = {{1.0f, 0.0f}};
 
 		// Transfer G-buffers to render target state for each buffer
-		TextureBarrier barrier;
+		RenderTargetBarrier* barriers = (RenderTargetBarrier*)alloca((RenderPasses[RenderPass::GBuffer]->RenderTargets.size() + 1) * sizeof(*barriers));
+		barriers[0] = { pDepthBuffer, RESOURCE_STATE_DEPTH_WRITE };
 		for (uint32_t i = 0; i < RenderPasses[RenderPass::GBuffer]->RenderTargets.size(); ++i)
 		{
-			barrier = { RenderPasses[RenderPass::GBuffer]->RenderTargets[i]->pTexture, RESOURCE_STATE_RENDER_TARGET };
-			cmdResourceBarrier(cmd, 0, NULL, 1, &barrier);
+			barriers[1 + i] = { RenderPasses[RenderPass::GBuffer]->RenderTargets[i], RESOURCE_STATE_RENDER_TARGET };
 		}
-
-		// Transfer DepthBuffer to a DephtWrite State
-		barrier = { pDepthBuffer->pTexture, RESOURCE_STATE_DEPTH_WRITE };
-		cmdResourceBarrier(cmd, 0, NULL, 1, &barrier);
+		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, (uint32_t)RenderPasses[RenderPass::GBuffer]->RenderTargets.size() + 1, barriers);
 
 		//Set rendertargets and viewports
 		cmdBindRenderTargets(
 			cmd, (uint32_t)RenderPasses[RenderPass::GBuffer]->RenderTargets.size(), RenderPasses[RenderPass::GBuffer]->RenderTargets.data(),
 			pDepthBuffer, &loadActions, NULL, NULL, -1, -1);
 		cmdSetViewport(
-			cmd, 0.0f, 0.0f, (float)RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mDesc.mWidth,
-			(float)RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mDesc.mHeight, 0.0f, 1.0f);
+			cmd, 0.0f, 0.0f, (float)RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mWidth,
+			(float)RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mHeight, 0.0f, 1.0f);
 		cmdSetScissor(
-			cmd, 0, 0, RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mDesc.mWidth,
-			RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mDesc.mHeight);
+			cmd, 0, 0, RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mWidth,
+			RenderPasses[RenderPass::GBuffer]->RenderTargets[0]->mHeight);
 
 		// Draw props
-		cmdBeginGpuTimestampQuery(cmd, pGpuProfiler, "GBuffer Pass", true);
+		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "GBuffer Pass");
 
 		cmdBindPipeline(cmd, RenderPasses[RenderPass::GBuffer]->pPipeline);
 
@@ -2079,10 +1999,13 @@ void Draw()
 				uint mapIDs[5];
 			} data;
 
-			for (uint32_t i = 0; i < (uint32_t)SponzaProp.MeshBatches.size(); ++i)
+			cmdBindVertexBuffer(cmd, 3, SponzaProp.Geom->pVertexBuffers, SponzaProp.Geom->mVertexStrides, NULL);
+			cmdBindIndexBuffer(cmd, SponzaProp.Geom->pIndexBuffer, SponzaProp.Geom->mIndexType, 0);
+
+			for (uint32_t i = 0; i < (uint32_t)SponzaProp.Geom->mDrawArgCount; ++i)
 			{
-				MeshBatch* mesh = SponzaProp.MeshBatches[i];
-				int materialID = mesh->MaterialID;
+				const IndirectDrawIndexArguments& draw = SponzaProp.Geom->pDrawArgs[i];
+				int materialID = gMaterialIds[i];
 				materialID *= 5;    //because it uses 5 basic textures for rendering BRDF
 
 				//use bindless textures on all platforms except for iOS
@@ -2102,16 +2025,11 @@ void Draw()
                 cmdBindDescriptorSet(cmd, 0, RenderPasses[RenderPass::GBuffer]->pDescriptorSets[0]);
                 cmdBindDescriptorSet(cmd, gFrameIndex, RenderPasses[RenderPass::GBuffer]->pDescriptorSets[1]);
 
-				Buffer* pVertexBuffers[] = { mesh->pPositionStream, mesh->pNormalStream, mesh->pUVStream };
-				cmdBindVertexBuffer(cmd, 3, pVertexBuffers, NULL);
-
-				cmdBindIndexBuffer(cmd, mesh->pIndicesStream, 0);
-
-				cmdDrawIndexed(cmd, mesh->NoofIndices, 0, 0);
+				cmdDrawIndexed(cmd, draw.mIndexCount, draw.mStartIndex, draw.mVertexOffset);
 			}
 		}
 
-		cmdEndGpuTimestampQuery(cmd, pGpuProfiler);
+		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
 		endCmd(cmd);
 		allCmds.push_back(cmd);
@@ -2123,25 +2041,27 @@ void Draw()
 
 		beginCmd(cmd);
 
-		cmdBeginGpuTimestampQuery(cmd, pGpuProfiler, "Raytraced shadow Pass", true);
+		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Raytraced shadow Pass");
 
 		// Transfer DepthBuffer and normals to SRV State
-		TextureBarrier barriers[] = { { pDepthBuffer->pTexture, RESOURCE_STATE_SHADER_RESOURCE },
-									  { RenderPasses[RenderPass::GBuffer]->RenderTargets[GBufferRT::Normals]->pTexture,
-										RESOURCE_STATE_SHADER_RESOURCE },
-									  { RenderPasses[RenderPass::RaytracedShadows]->Textures[0], RESOURCE_STATE_UNORDERED_ACCESS } };
-		cmdResourceBarrier(cmd, 0, NULL, 3, barriers);
+		RenderTargetBarrier barriers[] = {
+			{ pDepthBuffer, RESOURCE_STATE_SHADER_RESOURCE },
+			{ RenderPasses[RenderPass::GBuffer]->RenderTargets[GBufferRT::Normals], RESOURCE_STATE_SHADER_RESOURCE },
+			{ RenderPasses[RenderPass::GBuffer]->RenderTargets[GBufferRT::Albedo], RESOURCE_STATE_SHADER_RESOURCE },
+		};
+		TextureBarrier uav = { RenderPasses[RenderPass::RaytracedShadows]->Textures[0], RESOURCE_STATE_UNORDERED_ACCESS };
+		cmdResourceBarrier(cmd, 0, NULL, 1, &uav, 3, barriers);
 
 		cmdBindPipeline(cmd, RenderPasses[RenderPass::RaytracedShadows]->pPipeline);
 		cmdBindDescriptorSet(cmd, 0, RenderPasses[RenderPass::RaytracedShadows]->pDescriptorSets[0]);
 		cmdBindDescriptorSet(cmd, gFrameIndex, RenderPasses[RenderPass::RaytracedShadows]->pDescriptorSets[1]);
 
-		const uint32_t threadGroupSizeX = RenderPasses[RenderPass::RaytracedShadows]->Textures[0]->mDesc.mWidth / 8 + 1;
-		const uint32_t threadGroupSizeY = RenderPasses[RenderPass::RaytracedShadows]->Textures[0]->mDesc.mHeight / 8 + 1;
+		const uint32_t threadGroupSizeX = mSettings.mWidth / 8 + 1;
+		const uint32_t threadGroupSizeY = mSettings.mHeight / 8 + 1;
 
 		cmdDispatch(cmd, threadGroupSizeX, threadGroupSizeY, 1);
 
-		cmdEndGpuTimestampQuery(cmd, pGpuProfiler);
+		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
 		endCmd(cmd);
 		allCmds.push_back(cmd);
@@ -2153,23 +2073,23 @@ void Draw()
 
 		beginCmd(cmd);
 
-		cmdBeginGpuTimestampQuery(cmd, pGpuProfiler, "Lighting Pass", true);
+		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Lighting Pass");
 
 		// Transfer shadowbuffer to SRV and lightbuffer to UAV states
 		TextureBarrier barriers[] = { { RenderPasses[RenderPass::RaytracedShadows]->Textures[0], RESOURCE_STATE_SHADER_RESOURCE },
 									  { RenderPasses[RenderPass::Lighting]->Textures[0], RESOURCE_STATE_UNORDERED_ACCESS } };
-		cmdResourceBarrier(cmd, 0, NULL, 2, barriers);
+		cmdResourceBarrier(cmd, 0, NULL, 2, barriers, 0, NULL);
 
 		cmdBindPipeline(cmd, RenderPasses[RenderPass::Lighting]->pPipeline);
 		cmdBindDescriptorSet(cmd, 0, RenderPasses[RenderPass::Lighting]->pDescriptorSets[0]);
 		cmdBindDescriptorSet(cmd, gFrameIndex, RenderPasses[RenderPass::Lighting]->pDescriptorSets[1]);
 
-		const uint32_t threadGroupSizeX = RenderPasses[RenderPass::Lighting]->Textures[0]->mDesc.mWidth / 16 + 1;
-		const uint32_t threadGroupSizeY = RenderPasses[RenderPass::Lighting]->Textures[0]->mDesc.mHeight / 16 + 1;
+		const uint32_t threadGroupSizeX = mSettings.mWidth / 16 + 1;
+		const uint32_t threadGroupSizeY = mSettings.mHeight / 16 + 1;
 
 		cmdDispatch(cmd, threadGroupSizeX, threadGroupSizeY, 1);
 
-		cmdEndGpuTimestampQuery(cmd, pGpuProfiler);
+		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
 		endCmd(cmd);
 		allCmds.push_back(cmd);
@@ -2180,29 +2100,27 @@ void Draw()
 		Cmd* cmd = RenderPasses[RenderPass::Composite]->ppCmds[gFrameIndex];
 		beginCmd(cmd);
 
-		cmdBeginGpuTimestampQuery(cmd, pGpuProfiler, "Composite Pass", true);
+		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Composite Pass");
 
 		// Transfer albedo and lighting to SRV State
 		TextureBarrier barriers[] = { { RenderPasses[RenderPass::Lighting]->Textures[0], RESOURCE_STATE_SHADER_RESOURCE },
-									  { RenderPasses[RenderPass::GBuffer]->RenderTargets[GBufferRT::Albedo]->pTexture,
-										RESOURCE_STATE_SHADER_RESOURCE },
 									  { RenderPasses[RenderPass::Composite]->Textures[0], RESOURCE_STATE_UNORDERED_ACCESS } };
-		cmdResourceBarrier(cmd, 0, NULL, 3, barriers);
+		cmdResourceBarrier(cmd, 0, NULL, 2, barriers, 0, NULL);
 
 		cmdBindPipeline(cmd, RenderPasses[RenderPass::Composite]->pPipeline);
 		cmdBindDescriptorSet(cmd, 0, RenderPasses[RenderPass::Composite]->pDescriptorSets[0]);
 
-		const uint32_t threadGroupSizeX = RenderPasses[RenderPass::Composite]->Textures[0]->mDesc.mWidth / 16 + 1;
-		const uint32_t threadGroupSizeY = RenderPasses[RenderPass::Composite]->Textures[0]->mDesc.mHeight / 16 + 1;
+		const uint32_t threadGroupSizeX = mSettings.mWidth / 16 + 1;
+		const uint32_t threadGroupSizeY = mSettings.mHeight / 16 + 1;
 
 		cmdDispatch(cmd, threadGroupSizeX, threadGroupSizeY, 1);
 
-		cmdEndGpuTimestampQuery(cmd, pGpuProfiler);
+		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
-		barriers[0] = { pRenderTarget->pTexture, RESOURCE_STATE_RENDER_TARGET };
-		barriers[1] = { RenderPasses[RenderPass::Composite]->Textures[0], RESOURCE_STATE_SHADER_RESOURCE };
+		RenderTargetBarrier rtBarrier = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET };
+		barriers[0] = { RenderPasses[RenderPass::Composite]->Textures[0], RESOURCE_STATE_SHADER_RESOURCE };
 
-		cmdResourceBarrier(cmd, 0, NULL, 2, barriers);
+		cmdResourceBarrier(cmd, 0, NULL, 1, barriers, 1, &rtBarrier);
 
 		endCmd(cmd);
 		allCmds.push_back(cmd);
@@ -2215,10 +2133,10 @@ void Draw()
 
 		LoadActionsDesc loadActions = {};
 		cmdBindRenderTargets(cmd, 1, &pRenderTarget, NULL, &loadActions, NULL, NULL, -1, -1);
-		cmdSetViewport(cmd, 0.0f, 0.0f, (float)pRenderTarget->mDesc.mWidth, (float)pRenderTarget->mDesc.mHeight, 0.0f, 1.0f);
-		cmdSetScissor(cmd, 0, 0, pRenderTarget->mDesc.mWidth, pRenderTarget->mDesc.mHeight);
+		cmdSetViewport(cmd, 0.0f, 0.0f, (float)pRenderTarget->mWidth, (float)pRenderTarget->mHeight, 0.0f, 1.0f);
+		cmdSetScissor(cmd, 0, 0, pRenderTarget->mWidth, pRenderTarget->mHeight);
 
-		cmdBeginGpuTimestampQuery(cmd, pGpuProfiler, "Copy to Backbuffer Pass");
+		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Copy to Backbuffer Pass");
 
 		// Draw  results
 		cmdBindPipeline(cmd, RenderPasses[RenderPass::CopyToBackbuffer]->pPipeline);
@@ -2227,46 +2145,47 @@ void Draw()
 		//draw fullscreen triangle
 		cmdDraw(cmd, 3, 0);
 
-		cmdEndGpuTimestampQuery(cmd, pGpuProfiler);
+		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
 		cmdBeginDebugMarker(cmd, 0, 1, 0, "Draw UI");
-		cmdBindRenderTargets(cmd, 1, &pRenderTarget, NULL, NULL, NULL, NULL, -1, -1);
-		gTimer.GetUSec(true);
 
 		gVirtualJoystick.Draw(cmd, { 1.0f, 1.0f, 1.0f, 1.0f });
 
-		gAppUI.DrawText(
-			cmd, float2(8, 15), eastl::string().sprintf("CPU %f ms", gTimer.GetUSecAverage() / 1000.0f).c_str(), &gFrameTimeDraw);
+        cmdDrawCpuProfile(cmd, float2(8, 15), &gFrameTimeDraw);
+		cmdDrawGpuProfile(cmd, float2(8, 40), gGpuProfileToken);
 
-		gAppUI.DrawText(
-			cmd, float2(8, 40), eastl::string().sprintf("GPU %f ms", (float)pGpuProfiler->mCumulativeTime * 1000.0f).c_str(),
-			&gFrameTimeDraw);
-		gAppUI.DrawDebugGpuProfile(cmd, float2(8, 65), pGpuProfiler, NULL);
-
-		cmdDrawProfiler();
+		cmdDrawProfilerUI();
 
 		gAppUI.Gui(pGuiWindow);
 		gAppUI.Draw(cmd);
 		cmdEndDebugMarker(cmd);
 
 		cmdBindRenderTargets(cmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
-		TextureBarrier barriers[] = {
-			{ pRenderTarget->pTexture, RESOURCE_STATE_PRESENT },
-		};
+		RenderTargetBarrier barriers[] = { { pRenderTarget, RESOURCE_STATE_PRESENT } };
+		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 
-		cmdResourceBarrier(cmd, 0, NULL, 1, barriers);
-
-		cmdEndGpuFrameProfile(cmd, pGpuProfiler);
+		cmdEndGpuFrameProfile(cmd, gGpuProfileToken);
 
 		endCmd(cmd);
 		allCmds.push_back(cmd);
 	}
 
-	queueSubmit(
-		pGraphicsQueue, (uint32_t)allCmds.size(), allCmds.data(), pRenderCompleteFence, 1, &pImageAcquiredSemaphore, 1,
-		&pRenderCompleteSemaphore);
-	queuePresent(pGraphicsQueue, pSwapChain, gFrameIndex, 1, &pRenderCompleteSemaphore);
-	waitForFences(pRenderer, 1, &pRenderCompleteFence);
+	QueueSubmitDesc submitDesc = {};
+	submitDesc.mCmdCount = (uint32_t)allCmds.size();
+	submitDesc.mSignalSemaphoreCount = 1;
+	submitDesc.mWaitSemaphoreCount = 1;
+	submitDesc.ppCmds = allCmds.data();
+	submitDesc.ppSignalSemaphores = &pRenderCompleteSemaphore;
+	submitDesc.ppWaitSemaphores = &pImageAcquiredSemaphore;
+	submitDesc.pSignalFence = pRenderCompleteFence;
+	queueSubmit(pGraphicsQueue, &submitDesc);
+	QueuePresentDesc presentDesc = {};
+	presentDesc.mIndex = gFrameIndex;
+	presentDesc.mWaitSemaphoreCount = 1;
+	presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
+	presentDesc.pSwapChain = pSwapChain;
+	presentDesc.mSubmitDone = true;
+	queuePresent(pGraphicsQueue, &presentDesc);
 	flipProfiler();
 }
 
@@ -2288,10 +2207,9 @@ void prepareDescriptorSets()
         updateDescriptorSet(pRenderer, 0, RenderPasses[RenderPass::GBuffer]->pDescriptorSets[0], 1, params);
 		
 
-		for (uint32_t i = 0; i < (uint32_t)SponzaProp.MeshBatches.size(); ++i)
+		for (uint32_t i = 0; i < (uint32_t)SponzaProp.Geom->mDrawArgCount; ++i)
 		{
-			MeshBatch* mesh = SponzaProp.MeshBatches[i];
-			int materialID = mesh->MaterialID;
+			int materialID = gMaterialIds[i];
 			materialID *= 5;    //because it uses 5 basic textures for rendering BRDF
 
 			//bind textures explicitely for iOS
@@ -2385,7 +2303,6 @@ bool addSwapChain()
 	swapChainDesc.mWidth = mSettings.mWidth;
 	swapChainDesc.mHeight = mSettings.mHeight;
 	swapChainDesc.mImageCount = gImageCount;
-	swapChainDesc.mSampleCount = SAMPLE_COUNT_1;
 	swapChainDesc.mColorFormat = getRecommendedSwapchainFormat(true);
 	swapChainDesc.mEnableVsync = false;
 	::addSwapChain(pRenderer, &swapChainDesc, &pSwapChain);

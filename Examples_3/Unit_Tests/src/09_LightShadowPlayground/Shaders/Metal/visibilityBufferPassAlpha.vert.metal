@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of TheForge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -28,59 +28,30 @@
 using namespace metal;
 
 #include "Shader_Defs.h"
+#include "packing.h"
+#include "vb_argument_buffers.h"
 
-struct PackedVertexPosData {
-    packed_float3 position;
-};
-
-struct PackedVertexTexcoord {
-    packed_float2 texCoord;
-};
-
-struct VSOutput {
+struct VSOutput
+{
 	float4 position [[position]];
     float2 texCoord;
     uint triangleID;
 };
 
-struct PerBatchUniforms {
-    uint drawId;
-    uint twoSided;
-};
-
-struct IndirectDrawArguments
-{
-    uint vertexCount;
-    uint instanceCount;
-    uint startVertex;
-    uint startInstance;
-};
-
 struct VSInput
 {
 	float4 Position [[attribute(0)]];
-	float2 TexCoord [[attribute(1)]];
-};
-
-
-struct Uniforms_objectUniformBlock
-{
-	float4x4 mWorldViewProjMat;
-	float4x4 mWorldMat;
-};
-
-struct VSData {
-    constant Uniforms_objectUniformBlock & objectUniformBlock   [[id(0)]];
+	uint TexCoord [[attribute(1)]];
 };
 
 // Vertex shader
 vertex VSOutput stageMain(
     VSInput input                           [[stage_in]],
-    constant VSData& vsData                 [[buffer(UPDATE_FREQ_PER_DRAW)]]
+    constant ArgDataPerDraw& vsData                 [[buffer(UPDATE_FREQ_PER_DRAW)]]
 )
 {
 	VSOutput result;
 	result.position = vsData.objectUniformBlock.mWorldViewProjMat * input.Position;
-	result.texCoord = input.TexCoord;
+	result.texCoord = unpack2Floats(input.TexCoord);
 	return result;
 }

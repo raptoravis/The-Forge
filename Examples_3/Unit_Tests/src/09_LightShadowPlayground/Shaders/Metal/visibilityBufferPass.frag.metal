@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of TheForge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -29,17 +29,8 @@ using namespace metal;
 
 #include "Shader_Defs.h"
 
-struct PackedVertexPosData {
-    packed_float3 position;
-};
-
 struct VSOutput {
 	float4 position [[position]];
-};
-
-struct PerBatchUniforms {
-    uint drawId;
-    uint twoSided;
 };
 
 uint packVisBufData(bool opaque, uint drawId, uint triangleId)

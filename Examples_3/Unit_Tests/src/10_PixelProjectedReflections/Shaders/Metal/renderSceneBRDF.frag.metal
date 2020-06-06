@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -70,14 +70,14 @@ struct DirectionalLight
 	float4 mDir;
 };
 
-
-struct DLightData {
+struct DLightData
+{
 	DirectionalLight dlights[16];
 	int currAmountOfDLights;
 };
 
-
-struct VSOutput {
+struct VSOutput
+{
 	float4 position [[position]];
 	float2 uv;
 };

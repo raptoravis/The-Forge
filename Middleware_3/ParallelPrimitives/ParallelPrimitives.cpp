@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -44,11 +44,11 @@
 
 #include "ParallelPrimitives.h"
 
-#include "../../Common_3/Renderer/ResourceLoader.h"
+#include "../../Common_3/Renderer/IResourceLoader.h"
 #include "../../Common_3/OS/Interfaces/ILog.h"
 #include "../../Common_3/OS/Interfaces/IMemory.h"
 
-ResourceDirectory RD_MIDDLEWARE_PARALLEL_PRIMITIVES = RD_MIDDLEWARE_3;
+ResourceDirEnum RD_MIDDLEWARE_PARALLEL_PRIMITIVES = RD_MIDDLEWARE_3;
 
 ParallelPrimitives::PipelineComponents::PipelineComponents() : mNextSetIndex(0), pDescriptorSet(NULL), pShader(NULL), pPipeline(NULL), pRootSignature(NULL) {}
 
@@ -125,8 +125,8 @@ Buffer* ParallelPrimitives::temporaryBuffer(size_t length) {
 	Buffer* buffer = NULL;
 	for (eastl::vector<Buffer*>::const_iterator it = mTemporaryBuffers.begin(); it < mTemporaryBuffers.end(); ++it) {
 		Buffer* candidateBuffer = *it;
-		uint64_t candidateLength = candidateBuffer->mDesc.mSize;
-		if (candidateLength >= length && (buffer == NULL || buffer->mDesc.mSize > candidateLength)) {
+		uint64_t candidateLength = candidateBuffer->mSize;
+		if (candidateLength >= length && (buffer == NULL || buffer->mSize > candidateLength)) {
 			buffer = candidateBuffer;
 			bestBufferIt = it;
 		}
@@ -141,7 +141,7 @@ Buffer* ParallelPrimitives::temporaryBuffer(size_t length) {
 		bufferLoadDesc.mDesc.mSize = length;
 		bufferLoadDesc.mDesc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
 		bufferLoadDesc.mDesc.mElementCount = length / sizeof(int32_t);
-		addResource(&bufferLoadDesc);
+		addResource(&bufferLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
 	} else {
 		mTemporaryBuffers.erase_unsorted(bestBufferIt);
 	}
@@ -157,7 +157,7 @@ void ParallelPrimitives::depositTemporaryBuffer(Buffer* buffer) {
 void ParallelPrimitives::scanExclusiveAddWG(Cmd* pCmd, Buffer* input, Buffer* output, uint32_t elementCount) {
 	
 	cmdBindPipeline(pCmd, mScanExclusiveInt4.pPipeline);
-	cmdBindPushConstants(pCmd, mScanExclusiveInt4.pRootSignature, "elementCount", &elementCount);
+	cmdBindPushConstants(pCmd, mScanExclusiveInt4.pRootSignature, "elementCountRootConstant", &elementCount);
 	
 	DescriptorData params[2] = {};
 	
@@ -176,7 +176,7 @@ void ParallelPrimitives::scanExclusiveAddWG(Cmd* pCmd, Buffer* input, Buffer* ou
 	BufferBarrier barriers[] = {
 		{ output, RESOURCE_STATE_UNORDERED_ACCESS, false },
 	};
-	cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+	cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 }
 
 void ParallelPrimitives::scanExclusiveAddTwoLevel(Cmd* pCmd, Buffer* input, Buffer* output, uint32_t elementCount) {
@@ -206,7 +206,7 @@ void ParallelPrimitives::scanExclusiveAddTwoLevel(Cmd* pCmd, Buffer* input, Buff
 		params[2].ppBuffers = &devicePartSums;
 		params[2].pName = "outputSums";
 		
-		cmdBindPushConstants(pCmd, bottomLevelScan.pRootSignature, "elementCount", &elementCount);
+		cmdBindPushConstants(pCmd, bottomLevelScan.pRootSignature, "elementCountRootConstant", &elementCount);
 		
 		uint32_t setIndex = incrementSetIndex(&bottomLevelScan.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, bottomLevelScan.pDescriptorSet, 3, params);
@@ -218,7 +218,7 @@ void ParallelPrimitives::scanExclusiveAddTwoLevel(Cmd* pCmd, Buffer* input, Buff
 			{ output, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			{ devicePartSums, RESOURCE_STATE_UNORDERED_ACCESS, false }
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	{
@@ -229,7 +229,7 @@ void ParallelPrimitives::scanExclusiveAddTwoLevel(Cmd* pCmd, Buffer* input, Buff
 		params[1].ppBuffers = &devicePartSums;
 		params[1].pName = "outputArray";
 		
-		cmdBindPushConstants(pCmd, topLevelScan.pRootSignature, "elementCount", &bottomLevelScanGroupCount);
+		cmdBindPushConstants(pCmd, topLevelScan.pRootSignature, "elementCountRootConstant", &bottomLevelScanGroupCount);
 		
 		uint32_t setIndex = incrementSetIndex(&topLevelScan.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, topLevelScan.pDescriptorSet, 2, params);
@@ -239,7 +239,7 @@ void ParallelPrimitives::scanExclusiveAddTwoLevel(Cmd* pCmd, Buffer* input, Buff
 		BufferBarrier barriers[] = {
 			{ devicePartSums, RESOURCE_STATE_UNORDERED_ACCESS, false }
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	{
@@ -250,7 +250,7 @@ void ParallelPrimitives::scanExclusiveAddTwoLevel(Cmd* pCmd, Buffer* input, Buff
 		params[1].ppBuffers = &output;
 		params[1].pName = "inoutArray";
 		
-		cmdBindPushConstants(pCmd, distributeSums.pRootSignature, "elementCount", &elementCount);
+		cmdBindPushConstants(pCmd, distributeSums.pRootSignature, "elementCountRootConstant", &elementCount);
 		
 		uint32_t setIndex = incrementSetIndex(&distributeSums.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, distributeSums.pDescriptorSet, 2, params);
@@ -261,7 +261,7 @@ void ParallelPrimitives::scanExclusiveAddTwoLevel(Cmd* pCmd, Buffer* input, Buff
 		BufferBarrier barriers[] = {
 			{ output, RESOURCE_STATE_UNORDERED_ACCESS, false }
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	depositTemporaryBuffer(devicePartSums);
@@ -298,7 +298,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		params[2].ppBuffers = &devicePartSumsBottomLevel;
 		params[2].pName = "outputSums";
 		
-		cmdBindPushConstants(pCmd, bottomLevelScan.pRootSignature, "elementCount", &elementCount);
+		cmdBindPushConstants(pCmd, bottomLevelScan.pRootSignature, "elementCountRootConstant", &elementCount);
 		
 		uint32_t setIndex = incrementSetIndex(&bottomLevelScan.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, bottomLevelScan.pDescriptorSet, 3, params);
@@ -310,7 +310,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 			{ output, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			{ devicePartSumsBottomLevel, RESOURCE_STATE_UNORDERED_ACCESS, false },
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	{
@@ -323,7 +323,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		params[2].ppBuffers = &devicePartSumsMidLevel;
 		params[2].pName = "outputSums";
 		
-		cmdBindPushConstants(pCmd, bottomLevelScan.pRootSignature, "elementCount", &bottomLevelScanGroupCount);
+		cmdBindPushConstants(pCmd, bottomLevelScan.pRootSignature, "elementCountRootConstant", &bottomLevelScanGroupCount);
 		
 		uint32_t setIndex = incrementSetIndex(&bottomLevelScan.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, bottomLevelScan.pDescriptorSet, 3, params);
@@ -335,7 +335,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 			{ devicePartSumsBottomLevel, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			{ devicePartSumsMidLevel, RESOURCE_STATE_UNORDERED_ACCESS, false },
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	{
@@ -346,7 +346,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		params[1].ppBuffers = &devicePartSumsMidLevel;
 		params[1].pName = "outputArray";
 		
-		cmdBindPushConstants(pCmd, topLevelScan.pRootSignature, "elementCount", &midLevelScanGroupCount);
+		cmdBindPushConstants(pCmd, topLevelScan.pRootSignature, "elementCountRootConstant", &midLevelScanGroupCount);
 		
 		uint32_t setIndex = incrementSetIndex(&topLevelScan.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, topLevelScan.pDescriptorSet, 2, params);
@@ -357,7 +357,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		BufferBarrier barriers[] = {
 			{ devicePartSumsMidLevel, RESOURCE_STATE_UNORDERED_ACCESS, false },
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	{
@@ -368,7 +368,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		params[1].ppBuffers = &devicePartSumsBottomLevel;
 		params[1].pName = "outputArray";
 		
-		cmdBindPushConstants(pCmd, distributeSums.pRootSignature, "elementCount", &bottomLevelScanGroupCount);
+		cmdBindPushConstants(pCmd, distributeSums.pRootSignature, "elementCountRootConstant", &bottomLevelScanGroupCount);
 		
 		uint32_t setIndex = incrementSetIndex(&distributeSums.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, distributeSums.pDescriptorSet, 2, params);
@@ -379,7 +379,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		BufferBarrier barriers[] = {
 			{ devicePartSumsBottomLevel, RESOURCE_STATE_UNORDERED_ACCESS, false },
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	{
@@ -390,7 +390,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		params[1].ppBuffers = &output;
 		params[1].pName = "inoutArray";
 		
-		cmdBindPushConstants(pCmd, distributeSums.pRootSignature, "elementCount", &elementCount);
+		cmdBindPushConstants(pCmd, distributeSums.pRootSignature, "elementCountRootConstant", &elementCount);
 		
 		uint32_t setIndex = incrementSetIndex(&distributeSums.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, distributeSums.pDescriptorSet, 2, params);
@@ -401,7 +401,7 @@ void ParallelPrimitives::scanExclusiveAddThreeLevel(Cmd* pCmd, Buffer* input, Bu
 		BufferBarrier barriers[] = {
 			{ output, RESOURCE_STATE_UNORDERED_ACCESS, false },
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	depositTemporaryBuffer(devicePartSumsBottomLevel);
@@ -456,7 +456,7 @@ void ParallelPrimitives::sortRadixKeysValues(Cmd* pCmd, Buffer* inputKeys, Buffe
 		{
 			cmdBindPipeline(pCmd, histogramKernel.pPipeline);
 			
-			cmdBindPushConstants(pCmd, histogramKernel.pRootSignature, "pushConstants", &offset);
+			cmdBindPushConstants(pCmd, histogramKernel.pRootSignature, "rootConstants", &offset);
 			
 			params[0].ppBuffers = &fromKeys;
 			params[0].pName = "inputArray";
@@ -474,7 +474,7 @@ void ParallelPrimitives::sortRadixKeysValues(Cmd* pCmd, Buffer* inputKeys, Buffe
 			BufferBarrier barriers[] = {
 				{ deviceHistograms, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			};
-			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 		}
 		
 		// Scan histograms
@@ -484,7 +484,7 @@ void ParallelPrimitives::sortRadixKeysValues(Cmd* pCmd, Buffer* inputKeys, Buffe
 		{
 			cmdBindPipeline(pCmd, scatterKeysAndVals.pPipeline);
 			
-			cmdBindPushConstants(pCmd, scatterKeysAndVals.pRootSignature, "pushConstants", &offset);
+			cmdBindPushConstants(pCmd, scatterKeysAndVals.pRootSignature, "rootConstants", &offset);
 			
 			params[0].ppBuffers = &fromKeys;
 			params[0].pName = "inputKeys";
@@ -509,7 +509,7 @@ void ParallelPrimitives::sortRadixKeysValues(Cmd* pCmd, Buffer* inputKeys, Buffe
 				{ toKeys, RESOURCE_STATE_UNORDERED_ACCESS, false },
 				{ toVals, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			};
-			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 		}
 		
 		if (offset == 0) {
@@ -574,7 +574,7 @@ void ParallelPrimitives::sortRadix(Cmd* pCmd, Buffer* inputKeys, Buffer* outputK
 		{
 			cmdBindPipeline(pCmd, histogramKernel.pPipeline);
 			
-			cmdBindPushConstants(pCmd, histogramKernel.pRootSignature, "pushConstants", &offset);
+			cmdBindPushConstants(pCmd, histogramKernel.pRootSignature, "rootConstants", &offset);
 			params[0].ppBuffers = &fromKeys;
 			params[0].pName = "inputArray";
 			params[1].ppBuffers = &deviceHistograms;
@@ -591,7 +591,7 @@ void ParallelPrimitives::sortRadix(Cmd* pCmd, Buffer* inputKeys, Buffer* outputK
 			BufferBarrier barriers[] = {
 				{ deviceHistograms, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			};
-			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 		}
 		
 		// Scan histograms
@@ -601,7 +601,7 @@ void ParallelPrimitives::sortRadix(Cmd* pCmd, Buffer* inputKeys, Buffer* outputK
 		{
 			cmdBindPipeline(pCmd, scatterKeys.pPipeline);
 			
-			cmdBindPushConstants(pCmd, scatterKeys.pRootSignature, "pushConstants", &offset);
+			cmdBindPushConstants(pCmd, scatterKeys.pRootSignature, "rootConstants", &offset);
 			params[0].ppBuffers = &fromKeys;
 			params[0].pName = "inputKeys";
 			params[1].ppBuffers = &elementCount.pBuffer;
@@ -620,7 +620,7 @@ void ParallelPrimitives::sortRadix(Cmd* pCmd, Buffer* inputKeys, Buffer* outputK
 			BufferBarrier barriers[] = {
 				{ toKeys, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			};
-			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+			cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 		}
 		
 		if (offset == 0) {
@@ -643,8 +643,8 @@ void ParallelPrimitives::sortRadix(Cmd* pCmd, Buffer* inputKeys, Buffer* outputK
 }
 
 void ParallelPrimitives::generateOffsetBuffer(Cmd* pCmd, Buffer* sortedCategoryIndices, Buffer* outputBuffer, Buffer* totalCountOutputBuffer, IndirectCountBuffer sortedIndicesCount, uint32_t categoryCount, uint32_t indirectThreadsPerThreadgroup) {
-	ASSERT(outputBuffer->mDesc.mSize >= categoryCount * sizeof(uint32_t));
-	ASSERT(totalCountOutputBuffer->mDesc.mSize >= 4 * sizeof(uint32_t));
+	ASSERT(outputBuffer->mSize >= categoryCount * sizeof(uint32_t));
+	ASSERT(totalCountOutputBuffer->mSize >= 4 * sizeof(uint32_t));
 	
 	cmdBeginDebugMarker(pCmd, 0, 1, 0, "Offset Buffer Generation");
 	
@@ -670,7 +670,7 @@ void ParallelPrimitives::generateOffsetBuffer(Cmd* pCmd, Buffer* sortedCategoryI
 	{
 		cmdBindPipeline(pCmd, mClearOffsetBuffer.pPipeline);
 		
-		cmdBindPushConstants(pCmd, mClearOffsetBuffer.pRootSignature, "pushConstants", &pushConstants);
+		cmdBindPushConstants(pCmd, mClearOffsetBuffer.pRootSignature, "rootConstants", &pushConstants);
 		
 		uint32_t setIndex = incrementSetIndex(&mClearOffsetBuffer.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, mClearOffsetBuffer.pDescriptorSet, 4, params);
@@ -681,13 +681,13 @@ void ParallelPrimitives::generateOffsetBuffer(Cmd* pCmd, Buffer* sortedCategoryI
 		BufferBarrier barriers[] = {
 			{ outputBuffer, RESOURCE_STATE_UNORDERED_ACCESS, false },
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	{
 		cmdBindPipeline(pCmd, mGenerateOffsetBuffer.pPipeline);
 		
-		cmdBindPushConstants(pCmd, mGenerateOffsetBuffer.pRootSignature, "pushConstants", &pushConstants);
+		cmdBindPushConstants(pCmd, mGenerateOffsetBuffer.pRootSignature, "rootConstants", &pushConstants);
 		
 		uint32_t setIndex = incrementSetIndex(&mGenerateOffsetBuffer.mNextSetIndex);
 		updateDescriptorSet(pCmd->pRenderer, setIndex, mGenerateOffsetBuffer.pDescriptorSet, 4, params);
@@ -699,7 +699,7 @@ void ParallelPrimitives::generateOffsetBuffer(Cmd* pCmd, Buffer* sortedCategoryI
 			{ outputBuffer, RESOURCE_STATE_UNORDERED_ACCESS, false },
 			{ totalCountOutputBuffer, RESOURCE_STATE_UNORDERED_ACCESS, false },
 		};
-		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	}
 	
 	
@@ -707,7 +707,7 @@ void ParallelPrimitives::generateOffsetBuffer(Cmd* pCmd, Buffer* sortedCategoryI
 }
 
 void ParallelPrimitives::generateIndirectArgumentsFromOffsetBuffer(Cmd* pCmd, Buffer* offsetBuffer, Buffer* activeIndexCountBuffer, Buffer* outIndirectArgumentsBuffer, uint32_t categoryCount, uint32_t indirectThreadsPerThreadgroup) {
-	ASSERT(outIndirectArgumentsBuffer->mDesc.mSize >= categoryCount * 4 * sizeof(uint32_t));
+	ASSERT(outIndirectArgumentsBuffer->mSize >= categoryCount * 4 * sizeof(uint32_t));
 	
 	cmdBeginDebugMarker(pCmd, 0, 1, 0, "Indirect Arguments from Offset Buffer");
 	
@@ -721,7 +721,7 @@ void ParallelPrimitives::generateIndirectArgumentsFromOffsetBuffer(Cmd* pCmd, Bu
 	
 	cmdBindPipeline(pCmd, mIndirectArgsFromOffsetBuffer.pPipeline);
 	
-	cmdBindPushConstants(pCmd, mIndirectArgsFromOffsetBuffer.pRootSignature, "pushConstants", &pushConstants);
+	cmdBindPushConstants(pCmd, mIndirectArgsFromOffsetBuffer.pRootSignature, "rootConstants", &pushConstants);
 	
 	DescriptorData params[3] = {};
 	
@@ -743,7 +743,7 @@ void ParallelPrimitives::generateIndirectArgumentsFromOffsetBuffer(Cmd* pCmd, Bu
 	BufferBarrier barriers[] = {
 		{ outIndirectArgumentsBuffer, RESOURCE_STATE_UNORDERED_ACCESS, false },
 	};
-	cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL);
+	cmdResourceBarrier(pCmd, sizeof(barriers) / sizeof(barriers[0]), barriers, 0, NULL, 0, NULL);
 	
 	cmdEndDebugMarker(pCmd);
 }

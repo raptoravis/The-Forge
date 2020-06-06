@@ -67,6 +67,12 @@
     <Filter Include="Utils">
       <UniqueIdentifier>{f6c4d317-0683-49d8-98da-c8e3ec613e69}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Dependencies\zip">
+      <UniqueIdentifier>{94561365-2e90-4140-bacd-276c1b9c04cb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Dependencies\rmem">
+      <UniqueIdentifier>{b4df5063-637c-4986-968c-c129bdde13c4}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\..\..\Common_3\OS\Interfaces\IFileSystem.h">
@@ -150,12 +156,6 @@
     <ClInclude Include="..\..\..\..\..\Common_3\OS\Core\ThreadSystem.h">
       <Filter>OS\Core</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\MicroProfile\ProfilerBase.h">
-      <Filter>OS\Profiler</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\MicroProfile\ProfilerHTML.h">
-      <Filter>OS\Profiler</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\..\..\Common_3\OS\Interfaces\IProfiler.h">
       <Filter>OS\Interfaces</Filter>
     </ClInclude>
@@ -174,9 +174,6 @@
     <ClInclude Include="..\..\..\..\..\Common_3\OS\Interfaces\IInput.h">
       <Filter>OS\Interfaces</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\MicroProfile\ProfilerWidgetsUI.h">
-      <Filter>OS\Profiler</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\..\..\Common_3\OS\FileSystem\FileSystemInternal.h">
       <Filter>OS\FileSystem</Filter>
     </ClInclude>
@@ -192,14 +189,14 @@
     <ClInclude Include="..\..\..\..\..\Common_3\OS\FileSystem\MemoryStream.h">
       <Filter>OS\FileSystem</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\..\Middleware_3\ECS\BaseComponent.h">
-      <Filter>OS\Middleware_3\ECS</Filter>
+    <ClInclude Include="..\..\..\..\..\Common_3\OS\Profiler\GpuProfiler.h">
+      <Filter>OS\Profiler</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\..\Middleware_3\ECS\ComponentRepresentation.h">
-      <Filter>OS\Middleware_3\ECS</Filter>
+    <ClInclude Include="..\..\..\..\..\Common_3\OS\Profiler\ProfilerBase.h">
+      <Filter>OS\Profiler</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\..\..\Middleware_3\ECS\EntityManager.h">
-      <Filter>OS\Middleware_3\ECS</Filter>
+    <ClInclude Include="..\..\..\..\..\Common_3\OS\Profiler\ProfilerHTML.h">
+      <Filter>OS\Profiler</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -208,9 +205,6 @@
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\Common_3\OS\Image\Image.cpp">
       <Filter>OS\Image</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\TinyEXR\tinyexr.cpp">
-      <Filter>Dependencies</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\Common_3\OS\Core\Timer.cpp">
       <Filter>OS\Core</Filter>
@@ -299,12 +293,6 @@
     <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\EASTL\allocator_forge.cpp">
       <Filter>Dependencies\EASTL</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\MicroProfile\Profiler.cpp">
-      <Filter>OS\Profiler</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\MicroProfile\ProfilerBase.cpp">
-      <Filter>OS\Profiler</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\..\..\Common_3\OS\Windows\WindowsTime.cpp">
       <Filter>OS\Windows</Filter>
     </ClCompile>
@@ -322,9 +310,6 @@
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\basis_universal\transcoder\basisu_transcoder.cpp">
       <Filter>OS\Image</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\MicroProfile\ProfilerWidgetsUI.cpp">
-      <Filter>OS\Profiler</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\..\Common_3\OS\FileSystem\FileSystemInternal.cpp">
       <Filter>OS\FileSystem</Filter>
@@ -347,14 +332,26 @@
     <ClCompile Include="..\..\..\..\..\Common_3\OS\FileSystem\MemoryStream.cpp">
       <Filter>OS\FileSystem</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Middleware_3\ECS\BaseComponent.cpp">
-      <Filter>OS\Middleware_3\ECS</Filter>
+    <ClCompile Include="..\..\..\..\..\Common_3\OS\Profiler\GpuProfiler.cpp">
+      <Filter>OS\Profiler</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Middleware_3\ECS\ComponentRepresentation.cpp">
-      <Filter>OS\Middleware_3\ECS</Filter>
+    <ClCompile Include="..\..\..\..\..\Common_3\OS\Profiler\ProfilerBase.cpp">
+      <Filter>OS\Profiler</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\..\..\Middleware_3\ECS\EntityManager.cpp">
-      <Filter>OS\Middleware_3\ECS</Filter>
+    <ClCompile Include="..\..\..\..\..\Common_3\OS\Profiler\ProfilerWidgetsUI.cpp">
+      <Filter>OS\Profiler</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\zip\zip.cpp">
+      <Filter>Dependencies\zip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\rmem\src\rmem_get_module_info.cpp">
+      <Filter>Dependencies\rmem</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\rmem\src\rmem_hook.cpp">
+      <Filter>Dependencies\rmem</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\..\Common_3\ThirdParty\OpenSource\rmem\src\rmem_lib.cpp">
+      <Filter>Dependencies\rmem</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

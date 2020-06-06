@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -367,7 +367,7 @@ int AndroidMain(void* param, IApp* app)
 	pApp->Exit();
 
 	Log::Exit();
-	fsDeinitAPI();
+	fsExitAPI();
 	MemAllocExit();
 
 #ifdef AUTOMATED_TESTING

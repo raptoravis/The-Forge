@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -34,8 +34,9 @@ class UnixFileSystem: public FileSystem
 
 	bool   IsReadOnly() const override;
 	char   GetPathDirectorySeparator() const override;
-	size_t GetRootPathLength() const override;
-
+	size_t GetDefaultRootPathLength() const override;
+	size_t GetRootPathLength(const Path * path) const override;
+	
 	/// Fills path's buffer with the canonical root path corresponding to the root of absolutePathString,
 	/// and returns an offset into absolutePathString containing the path component after the root by pathComponentOffset.
 	/// path is assumed to have storage for up to 16 characters.

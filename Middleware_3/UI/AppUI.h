@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -32,7 +32,7 @@
 
 typedef void (*WidgetCallback)();
 
-extern ResourceDirectory RD_MIDDLEWARE_UI;
+extern ResourceDirEnum RD_MIDDLEWARE_UI;
 
 struct Renderer;
 struct Texture;
@@ -41,14 +41,8 @@ struct RootSignature;
 struct DescriptorSet;
 struct Pipeline;
 struct Sampler;
-struct RasterizerState;
-struct DepthState;
-struct BlendState;
 struct Buffer;
 struct Texture;
-
-struct GpuProfiler;
-struct GpuProfileDrawDesc;
 
 class IWidget
 {
@@ -785,6 +779,7 @@ class GuiComponent
 	float4                         mCurrentWindowRect;
 	eastl::string                  mTitle;
 	uintptr_t                      pFont;
+    float                          mAlpha;
 	// defaults to GUI_COMPONENT_FLAGS_ALWAYS_AUTO_RESIZE
 	int32_t                        mFlags;
 
@@ -845,21 +840,23 @@ private:
 /************************************************************************/
 class GUIDriver
 {
-	public:
-		struct GUIUpdate
-		{
-			GuiComponent** pGuiComponents;
-			uint32_t componentCount;
-			float deltaTime;
-			float width;
-			float height;
-			bool showDemoWindow;
-		};
+public:
+	struct GUIUpdate
+	{
+		GuiComponent** pGuiComponents;
+		uint32_t componentCount;
+		float deltaTime;
+		float width;
+		float height;
+		bool showDemoWindow;
+	};
+
+	virtual ~GUIDriver() {}
 
 	virtual bool init(Renderer* pRenderer, uint32_t const maxDynamicUIUpdatesPerBatch) = 0;
 	virtual void exit() = 0;
 
-	virtual bool load(RenderTarget** ppRts, uint32_t count) = 0;
+	virtual bool load(RenderTarget** pRts, uint32_t count) = 0;
 	virtual void unload() = 0;
 
 	// For GUI with custom shaders not necessary in a normal application
@@ -915,7 +912,7 @@ class UIApp: public IMiddleware
 	void Update(float deltaTime);
 	void Draw(Cmd* cmd);
 
-	uint          LoadFont(const char* pFontPath, ResourceDirectory root);
+	uint          LoadFont(const char* pFontPath, ResourceDirEnum root);
 	GuiComponent* AddGuiComponent(const char* pTitle, const GuiDesc* pDesc);
 	void          RemoveGuiComponent(GuiComponent* pComponent);
 	void          RemoveAllGuiComponents();
@@ -937,8 +934,6 @@ class UIApp: public IMiddleware
 	// draws the @pText in world space by using the linear transformation pipeline.
 	//
 	void DrawTextInWorldSpace(Cmd* pCmd, const char* pText, const mat4& matWorld, const mat4& matProjView, const TextDrawDesc* pDrawDesc = NULL);
-
-	void DrawDebugGpuProfile(Cmd* pCmd, const float2& screenCoordsInPx, GpuProfiler* pGpuProfiler, const GpuProfileDrawDesc* pDrawDesc = NULL);
 
 	bool    OnText(const wchar_t* pText) { return pDriver->onText(pText); }
 	bool    OnButton(uint32_t button, bool press, const float2* vec) { return pDriver->onButton(button, press, vec); }
@@ -965,7 +960,11 @@ private:
 class VirtualJoystickUI
 {
 	public:
-	VirtualJoystickUI(float insideRadius = 100.0f, float outsideRadius = 200.0f): mInsideRadius(insideRadius), mOutsideRadius(outsideRadius) {}
+	VirtualJoystickUI(float insideRadius = 100.0f, float outsideRadius = 200.0f)
+#if defined(TARGET_IOS) || defined(__ANDROID__)
+		: mInsideRadius(insideRadius), mOutsideRadius(outsideRadius)
+#endif
+	{}
 
 	// Init resources
 	bool Init(Renderer* pRenderer, const char* pJoystickTexture, uint root);
@@ -977,6 +976,7 @@ class VirtualJoystickUI
     bool OnMove(uint32_t id, bool press, const float2* vec);
 
 private:
+#if defined(TARGET_IOS) || defined(__ANDROID__) || defined(NX64)
 	Renderer*         pRenderer;
 	Shader*           pShader;
 	RootSignature*    pRootSignature;
@@ -984,13 +984,9 @@ private:
 	Pipeline*         pPipeline;
 	Texture*          pTexture;
 	Sampler*          pSampler;
-	BlendState*       pBlendAlpha;
-	DepthState*       pDepthState;
-	RasterizerState*  pRasterizerState;
 	Buffer*           pMeshBuffer;
 	float2            mRenderSize;
 	//input related
-private:
 	float             mInsideRadius;
 	float             mOutsideRadius;
 
@@ -1003,4 +999,5 @@ private:
 	// Left -> Index 0
 	// Right -> Index 1
 	StickInput       mSticks[2];
+#endif
 };

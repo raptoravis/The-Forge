@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -25,35 +25,19 @@
 #include <metal_stdlib>
 using namespace metal;
 
-struct CameraData
-{
-    float4x4 viewMat;
-    float4x4 projMat;
-    float4x4 viewProjMat;
-    float4x4 InvViewProjMat;
-
-    float4 cameraWorldPos;
-    float4 viewPortSize;
-};
-struct ObjectData
-{
-    float4x4 worldMat;
-    float roughness;
-    float metalness;
-};
-
 struct VSInput
 {
     float3 position [[attribute(0)]];
     float2 uv   [[attribute(1)]];
 };
 
-struct VSOutput {
+struct VSOutput
+{
     float4 position [[position]];
     float2 uv;
 };
 
-vertex VSOutput stageMain(VSInput In                    [[stage_in]])
+vertex VSOutput stageMain(VSInput In [[stage_in]])
 {
     VSOutput result;
     result.position = float4(In.position,1.0);

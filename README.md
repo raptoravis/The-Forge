@@ -11,7 +11,8 @@ The Forge is a cross-platform rendering framework supporting
 - macOS / iOS / iPad OS with Metal 2.2
 - XBOX One / XBOX One X (only available for accredited developers on request)
 - PS4 / PS4 Pro (only available for accredited developers on request)
-- Switch (in development) (only available for accredited developers on request)
+- PS5 (in development) (only available for accredited developers on request)
+- Switch (only available for accredited developers on request)
 - Google Stadia (in development) (only available for accredited developers on request)
 
 Particularly, the graphics layer of The Forge supports cross-platform
@@ -21,12 +22,11 @@ Particularly, the graphics layer of The Forge supports cross-platform
 - Multi-threaded command buffer generation
 
 The Forge can be used to provide the rendering layer for custom next-gen game engines. It is also meant to provide building blocks to write your own game engine. It is like a "lego" set that allows you to use pieces to build a game engine quickly. The "lego" High-Level Features supported on all platforms are at the moment:
-- Asynchronous Resource loading with a resource loader task system as shown in 10_PixelProjectedReflections
+- Resource Loader as shown in 10_PixelProjectedReflections, capable to load textures, buffers and geometry data asynchronously
 - [Lua Scripting System](https://www.lua.org/) - currently used in 06_Playground to load models and textures and animate the camera
 - Animation System based on [Ozz Animation System](https://github.com/guillaumeblanc/ozz-animation)
 - Consistent Math Library  based on an extended version of [Vectormath](https://github.com/glampert/vectormath) with NEON intrinsics for mobile platforms
 - Extended version of [EASTL](https://github.com/electronicarts/EASTL/)
-- For loading art assets we have a modified and integrated version of [Assimp](https://github.com/assimp/assimp)
 - Consistent Memory Managament: 
   * on GPU following [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
   * on CPU [Fluid Studios Memory Manager](http://www.paulnettle.com/)
@@ -56,75 +56,81 @@ The Forge Interactive Inc. is a [Khronos member](https://www.khronos.org/members
 
 # News
 
-## Release 1.38 - November 14th - Cross-Platform Path Tracer
-- The new 16_Raytracing unit test shows a simple cross-platform path tracer. On iOS this path tracer requires A11 or higher. It is meant to be used in tools in the future and doesn't run in real-time.
-To support the new path tracer, the Metal raytracing backend has been overhauled to use a sort-and-dispatch based approach, enabling efficient support for multiple hit groups and miss shaders. The most significant limitation for raytracing on Metal is that only tail recursion is supported, which can be worked around using larger per-ray payloads and splitting up shaders into sub-shaders after each TraceRay call; see the Metal shaders used for 16_Raytracing for an example on how this can be done.
+## Release 1.43 - May 22nd, 2020 - MTuner | macOS / iOS run-time
+* Filesystem: it turns out the file system is still confusing and not intuitive. It mixes up several concepts but is not consistent and somehow favors Windows folder naming conventions, that do not exist in most of our target platforms. We did a slight first step with this release. We need to make a deeper change with the next release.
+* DirectX 11: the DirectX 11 run-time gets a lot of mileage now. For one game it went now successfully through a test center. This release holds a wide range of changes especially for multi-threaded rendering.
+* [MTuner](https://github.com/milostosic/MTuner) : we are making another attempt on integrating MTuner into the framework. We need it to tune memory usage in some game titles. The current version only reliably supports Windows but we try to extend it to more platforms.
+  * Integrated Milos Tosic’s MTuner SDK into the Windows 10 runtime of The Forge. Combined with mmgr, this addition will provide the following features:
+    * Automatic generation of .MTuner capture file alongside existing .memleaks file. 
+    * In-depth analysis of the generated file using MTuner’s user-friendly UI app.
+    * Clear and efficient highlighting of memory leaks and usage hotspots.
+  * Support for additional platforms coming soon!
 
-macOS 1920x1080 AMD Pro Vega 64
+MTuner
+MTuner was integrated into the Windows 10 runtime of The Forge following a request for more in-depth memory profiling capabilities by one of the developers we support. It has been adapted to work closely with our framework and its existing memory tracking capabilities to provide a complete picture of a given application’s memory usage. 
 
-![Path Tracer running on macOS](Screenshots/16_Path_Tracer_macOS.png)
+To use The Forge’s MTuner functionality, simply drag and drop the .MTuner file generated alongside your application’s executable into the MTuner host app, and you can immediately begin analyzing your program’s memory usage. The intuitive interface and exhaustive supply of allocation info contained in a single capture file makes it easy to identify usage patterns and hotspots, as well as tracking memory leaks down to the file and line number. The full documentation of MTuner can be found [here](link: https://milostosic.github.io/MTuner/).
 
-iOS iPhone X 812x375
+Currently, this feature is only available on Windows 10, but support for additional platforms provided by The Forge is forthcoming.
+Here is a screenshot of an example capture done on our first Unit Test, 01_Transformations:
+![MTuner](Screenshots/MTuner.png) 
 
-![Path Tracer running on macOS](Screenshots/16_Path_Tracer_iOS.jpeg)
-
-Windows 10 1080p NVIDIA RTX 2080 with DXR Driver version 441.12
-
-![Path Tracer running on Windows DXR](Screenshots/16_Path_Tracer_DXR.png)
-
-Windows 10 1080p NVIDIA RTX 2080 with RTX Driver version 441.12
-
-![Path Tracer running on Windows RTX](Screenshots/16_Path_Tracer_RTX.png)
-
-Linux 1080p NVIDIA RTX 2060 with RTX Driver version 435
-
-![Path Tracer running on Linux RTX](Screenshots/16_Path_Tracer_Linux_RTX.png)
+* Multi-Threading system: especially for the Switch run-time we extended our multi-threading system to support a "preferred" core.
+* macOS / iOS run-time got another make over. This time we brought the overall architecture a bit closer to the rest of the rendering system and we are also working towards supporting lower end hardware like a 2015 MacBook Air and macOS 10.13.6. Those requirements were based on the [Steam Hardware Survey](https://store.steampowered.com/hwsurvey/Steam-Hardware-Software-Survey-Welcome-to-Steam?platform=mac).
+* there are now functions that help you calcuate the memory usage supported by all APIs: look for caculateMemoryUse / freeMemoryStats
+* Windows management got a bit more flexible by offering borderless windows and more style attributes
+* 17_EntityComponentSystem runs now better on AMD CPUs ... there were some inefficiencies in the unit test ...
 
 
-- File System: Fixed an issue wherein compiled shader binaries weren’t being saved to the RD_SHADER_BINARIES resource directory
-- GitHub issues fixed:
-  * #150 - [Vulkan] Failed to extend descriptor pool
-  * #151 - [Vulkan] rootcbv of detection is case sensitive
-  * #152 - [Vulkan] updateDescriptorSet is different from the DirectX12
+## Release 1.42 - April 15th, 2020 - macOS / iOS run-time
+Most of us are working from home now due to the Covid-19 outbreak. We are all trying to balance life and work in new ways. Since the last release we made a thorough pass through the macOS / iOS run-time, so that it is easier to make macOS your main development environment for games.
+Unit-tests fixes:
+- Fixed wrong project ordering in XCode
+- Fixed build-time macOS / iOS warnings.
+- Fixed 03_Multithread until test not showing the appropriate charts for all threads
+- Fixed warnings in 06_MaterialPlayground due to wrong GLTF validation
+- Fixed visual artifacts in 08_GLTFViewer not producing correct normals due to wrong Metal shader.
+- Added missing projects to macOS / iOS workspace and removed unnecessary ones.
+- Fixed unit test 14_WaveIntrinsics macOS on AMD iMac. Implemented workaround for AMD driver issue on macOS.
 
-## Release 1.37 - October 30th - New Features Ephemeris 2 | Update Metal
-The Forge Interactive Inc., the company behind The Forge became a [Khronos Associate member]((https://www.khronos.org/members/list)).
- * Ephemeris 2
-   * New features
-     * Add Earth radius: controls the radius of clouds' radius with scale factor. The clouds field will be flatter and the user can see further along the horizon if the radius increase
-     * Add noise flow: controls the direction and intensity of clouds' noise flow
-     * Add rotation: rotates clouds based on a certain pivot position.
-     * Add the second layer: it is possible to generate the second cloud layer which can act, independently
-     * Add FXAA
-   * Improvement
-     * Ray-marching: now, hard-edge artifact is significantly reduced
-     * Silver-lining: improved its quality
-     * God ray: improved its quality
-   * Performance: up to 25% performance increased 
+Metal runtime fixes:
+- Fixed Metal issue handling barriers: scheduled barriers were being ignored, introducing visual artifacts due to read-write race condition.
 
-Click on the following image to see a video:
+Closed Issues:
+* #168 - 04_ExecuteInDirect poor performance on MacPro 2019, AMD Vega II, Catalina 10.15.3
+* #156 - Benchmark support?
 
-<a href="https://vimeo.com/369379476" rel="nofollow"><img src="Screenshots/Ephemeris2.jpg" alt="Ephemeris 2" style="max-width:100%;"></a>
-    Head over to [Custom Middleware](https://github.com/ConfettiFX/Custom-Middleware) to check out the source code.
- * macOS / iPad / iOS: ICB support for Metal renderer (draw; draw indexed; pipeline state switch with ICB; ICB optimization with BlitEncoder). The Visibility Buffer example now uses ICB features on MacOS
-   * reduced memory consumption for argument buffers in Metal
-   * fixes for Metal implementation of descriptor set
-   * minor fixes and optimizations in Metal renderer
-   * Due to bugs in the run-time for argument buffers we still can't run unit test 04, 06, and 10
- 
- The Visibility Buffer example runs now faster on macOS
-![macOS Visibility Buffer](Screenshots/ProfilerScreenshot_VisibilityBuffer.png)
- 
-## Release 1.36 - October 18th - New File System
- * New cross-platform FileSystem C API, supporting disk-based files, memory streams, and files in zip archives. The API can be viewed in [IFileSystem.h](Common_3/OS/Interfaces/IFileSystem.h), and all of the example code has been updated to use the new API.
-   * The API is based around `Path`s, where each `Path` represents an absolute, canonical path string on a particular file system. You can query information about the files at `Path`s, open files as `FileStream`s, and copy files between different `Path`s.
-   * The concept of `FileSystemRoot`s has been replaced by `ResourceDirectory`s. `ResourceDirectory`s are predefined directories where resources are expected to exist, and there are convenience functions to open files in resource directories. If your resources don’t exist within the default directory for a particular resource type, you can call `fsSetPathForResourceDirectory` to relocate the resource directory; see the unit tests for sample code on how to do this.
-   * There's a new 12_FileSystem unit test that demonstrates how to read files from zip archives:
 
-![File System Unit Test](Screenshots/12_FileSystem.png)
- 
- * Vulkan: Adaptive Order Independent Transparency with Raster Order Views is now supported when VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT is supported.
+## Release 1.41 - March 5th, 2020 - Path Tracing Benchmark | CPU Cacheline alignment | Improved Profiler | D3D12 Memory Allocator
+* Based on request we are providing a Path Tracing Benchmark in 16_RayTracing. It allows you to compare the performance of three platforms: 
+  * Windows with DirectX 12 DXR
+  * Windows with Vulkan RTX
+  * Linux with Vulkan RTX
 
+  We believe that every benchmarking tool should be open-source, so that everyone can see what the source code is doing. We will extend this benchmark to the non-public platforms we support to compare the PC performance with console performance. 
+  The benchmark comes with batch files for all three platforms. Each run generates a HTML output file from the microprofiler that is integrated in TF. The default number of iterations is 64 but you can adjust that.  There is a Readme file in the 16_RayTracing folder that describes the options.
+
+Windows DirectX 12 DXR, GeForce RTX 2070 Super, 3840x1600, NVIDIA Driver 441.99
+
+![Windows DXR output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile_DX.PNG) 
+
+Windows Vulkan RTX, GeForce RTX 2070 Super, 3840x1600, NVIDIA Driver 441.99
+
+![Windows RTX output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile.PNG) 
+
+Linux Vulkan RTX, Geforce RTX 2060, 1920x1080, NVIDIA Driver 435.21
+
+![Linux RTX output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile_Linux.PNG) 
+
+We will adjust the output of the benchmark to what users request.
+
+* With this release we also aligned the whole renderer interface better to 64 byte CPU cache lines. We trimmed down all the structs substantially and removed many. This is a breaking change for the renderer interface and a major change to the whole code base.
+* DirectX 12
+  * [D3D12 Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator): we are using now AMD's D3D12 memory allocator for DirectX after having used the Vulkan equivalent for more than two years. We also extended it to support Multi-GPU.
+  * We upgraded to the latest dxgi factory interface in DirectX 12
+* Microprofiler: because we need the microprofiler to offer the QA department help in reporting performance problems for some of the games that will be shipping with TF (and the benchmark mentioned above), we did another pass on its functionality and ease of use, especially on console platforms. The idea is that QA can quickly and easily store a screenshot or HTML file in a bug report. This is still work in progress and with every shipping game will probably be improved.
+* Now that GDC 2020 was postponed, we will also postpone our GDC related activities. The user meeting and our GDC talk will be postponed until the next GDC happens. If there is a need we can also do a user meeting in an online conference room or in Discord in a private area. Let us know.
+* Renamed CustomMiddleware to Custom-Middleware back ...
 
 See the release notes from previous releases in the [Release section](https://github.com/ConfettiFX/The-Forge/releases).
 
@@ -149,7 +155,7 @@ https://developer.microsoft.com/en-us/windows/downloads/sdk-archive
 
 # macOS Requirements:
 
-1. macOS 10.15 beta 8 (19A558d)
+1. macOS min spec. 10.13.6
 
 2. Xcode 11.0 (11A419c)
 
@@ -449,48 +455,77 @@ This unit test shows how to use the high-performance entity component system in 
 
 ![Image of the Entity Component System unit test in The Forge](Screenshots/17_EntityComponentSystem.png)
 
+## 18. Sparse Virtual Textures
+The Forge has now support for Sparse Virtual Textures on Windows and Linux with DirectX 12 / Vulkan. Sparse texture (also known as "virtual texture", “tiled texture”, or “mega-texture”) is a technique to load huge size (such as 16k x 16k or more) textures in GPU memory.
+It breaks an original texture down into small square or rectangular tiles to load only visible part of them.
 
-## 18. Ozz Playback Animation
+The unit test 18_Virtual_Texture is using 7 sparse textures:
+* Mercury: 8192 x 4096
+* Venus: 8192 x 4096
+* Earth: 8192 x 4096
+* Moon: 16384 x 8192
+* Mars: 8192 x 4096
+* Jupiter: 4096 x 2048
+* Saturn: 4096 x 4096
+
+There is a unit test that shows a solar system where you can approach planets with Sparse Virtual Textures attached and the resolution of the texture will increase when you approach.
+
+Linux 1080p NVIDIA RTX 2060 with RTX Driver version 435
+
+![Sparse Virtual Texture on Linux Vulkan](Screenshots/Virtual_Texture_Linux.png) 
+
+Windows 10 1080p NVIDIA 1080 DirectX 12
+
+![Sparse Virtual Texture on Windows 10 DirectX 12](Screenshots/Virtual_Texture.png) 
+
+Windows 10 1080p NVIDIA 1080 Vulkan
+
+![Sparse Virtual Texture on Windows Vulkan](Screenshots/Virtual_Texture_VULKAN_1920_1080_GTX1080.png) 
+
+![Sparse Virtual Texture on Windows Vulkan](Screenshots/Virtual_Texture_VULKAN_1920_1080_GTX1080_CloseUP.png) 
+
+
+## 21. Ozz Playback Animation
 This unit test shows how to playback a clip on a rig.
 
 ![Image of Playback Animation in The Forge](Screenshots/01_Playback.gif)
 
-## 19. Ozz Playback Blending
+## 22. Ozz Playback Blending
 This unit test shows how to blend multiple clips and play them back on a rig.
 
 ![Image of Playback Blending in The Forge](Screenshots/02_Blending.gif)
 
-## 20. Ozz Joint Attachment
+## 23. Ozz Joint Attachment
 This unit test shows how to attach an object to a rig which is being posed by an animation.
 
 ![Image of Ozz Joint Attachment in The Forge](Screenshots/03_JointAttachment.gif)
 
-## 21. Ozz Partial Blending
+## 24. Ozz Partial Blending
 This unit test shows how to blend clips having each only effect a certain portion of joints.
 
 ![Image of Ozz Partial Blending in The Forge](Screenshots/04_PartialBlending.gif)
 
-## 22. Ozz Additive Blending
+## 25. Ozz Additive Blending
 This unit test shows how to introduce an additive clip onto another clip and play the result on a rig.
 
 ![Image of Ozz Additive Blending in The Forge](Screenshots/05_Additive.gif)
 
-## 23. Ozz Baked Physics
+## 26. Ozz Baked Physics
 This unit test shows how to use a scene of a physics interaction that has been baked into an animation and play it back on a rig.
 
 ![Image of Ozz Baked Physics in The Forge](Screenshots/07_BakedPhysics.gif)
 
-## 24. Ozz Multi Threading
+## 27. Ozz Multi Threading
 This unit test shows how to animate multiple rigs simultaneously while using multi-threading for the animation updates.
 
 ![Image of Ozz Multi Threading in The Forge](Screenshots/09_MultiThread.gif)
 
-## 25. Ozz Skinning
+## 28. Ozz Skinning
 This unit test shows how to use skinning with Ozz
 
 ![Image of the Ozz Skinning unit test](Screenshots/Skinning_PC.gif)
 
-## 26. Ozz Inverse Kinematic
+## 29. Ozz Inverse Kinematic
 This unit test shows how to use a Aim and a Two bone IK solvers
 
 Aim IK
@@ -499,7 +534,7 @@ Aim IK
 Two Bone IK
 ![Ozz Two Bone IK](Screenshots/Ozz_two_bone_ik.gif)
 
-## 27. Audio Integration of SoLoud
+## 31. Audio Integration of SoLoud
 We integrated SoLoad. Here is a unit test that allow's you make noise ...
 
 ![Audio Integration](Screenshots/26_Audio.png)
@@ -513,6 +548,34 @@ There is an example implementation of the Triangle Visibility Buffer as covered 
 
 # Tools
 Below are screenshots and descriptions of some of the tools we integrated.
+
+## MTuner
+MTuner
+MTuner was integrated into the Windows 10 runtime of The Forge following a request for more in-depth memory profiling capabilities by one of the developers we support. It has been adapted to work closely with our framework and its existing memory tracking capabilities to provide a complete picture of a given application’s memory usage. 
+
+To use The Forge’s MTuner functionality, simply drag and drop the .MTuner file generated alongside your application’s executable into the MTuner host app, and you can immediately begin analyzing your program’s memory usage. The intuitive interface and exhaustive supply of allocation info contained in a single capture file makes it easy to identify usage patterns and hotspots, as well as tracking memory leaks down to the file and line number. The full documentation of MTuner can be found [here](link: https://milostosic.github.io/MTuner/).
+
+Currently, this feature is only available on Windows 10, but support for additional platforms provided by The Forge is forthcoming.
+Here is a screenshot of an example capture done on our first Unit Test, 01_Transformations:
+![MTuner](Screenshots/MTuner.png) 
+
+## Ray Tracing Benchmark
+Based on request we are providing a Ray Tracing Benchmark in 16_RayTracing. It allows you to compare the performance of three platforms: 
+  * Windows with DirectX 12 DXR
+  * Windows with Vulkan RTX
+  * Linux with Vulkan RTX
+
+  We will extend this benchmark to the non-public platforms we support to compare the PC performance with console performance. 
+  The benchmark comes with batch files for all three platforms. Each run generates a HTML output file from the profiler that is integrated in TF. The default number of iterations is 64 but you can adjust that.  There is a Readme file in the 16_RayTracing folder that describes the options.
+
+Windows DirectX 12 DXR, GeForce RTX 2070 Super, 3840x1600, NVIDIA Driver 441.99
+
+![Windows DXR output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile_DX.png) 
+
+Windows Vulkan RTX, GeForce RTX 2070 Super, 3840x1600, NVIDIA Driver 441.99
+
+![Windows RTX output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile.png) 
+
 
 ## Microprofiler
 We integrated the [Micro Profiler](https://github.com/zeux/microprofile) into our code base by replacing the proprietary UI with imGUI and simplified the usage. Now it is much more tightly and consistently integrated in our code base.
@@ -600,7 +663,6 @@ In case your School / College / University uses The Forge for education, we woul
 
 # Open-Source Libraries
 The Forge utilizes the following Open-Source libraries:
-* [Assimp](https://github.com/assimp/assimp)
 * [Fontstash](https://github.com/memononen/fontstash)
 * [Vectormath](https://github.com/glampert/vectormath)
 * [Nothings](https://github.com/nothings/stb) single file libs 
@@ -612,6 +674,7 @@ The Forge utilizes the following Open-Source libraries:
 * [SPIRV_Cross](https://github.com/KhronosGroup/SPIRV-Cross)
 * [TinyEXR](https://github.com/syoyo/tinyexr)
 * [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator)
+* [D3D12 Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator)
 * [GeometryFX](https://gpuopen.com/gaming-product/geometryfx/)
 * [WinPixEventRuntime](https://blogs.msdn.microsoft.com/pix/winpixeventruntime/)
 * [Fluid Studios Memory Manager](http://www.paulnettle.com/)
@@ -630,3 +693,4 @@ The Forge utilizes the following Open-Source libraries:
 * [meshoptimizer](https://github.com/zeux/meshoptimizer)
 * [Basis Universal Texture Support](https://github.com/binomialLLC/basis_universal)
 * [TinyImageFormat](https://github.com/DeanoC/tiny_imageformat)
+* [zip](https://github.com/kuba--/zip)

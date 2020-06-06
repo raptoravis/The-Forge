@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -27,8 +27,7 @@
 #include "../../Common_3/OS/Interfaces/ILog.h"
 #include "../../Common_3/OS/Interfaces/IFileSystem.h"
 
-#include "../../Common_3/Renderer/GpuProfiler.h"
-#include "../../Common_3/Renderer/ResourceLoader.h"
+#include "../../Common_3/Renderer/IResourceLoader.h"
 
 #include "../../Common_3/ThirdParty/OpenSource/EASTL/unordered_map.h"
 #include "../../Common_3/ThirdParty/OpenSource/EASTL/vector.h"
@@ -41,19 +40,11 @@
 namespace PlatformEvents {
 }
 
-ResourceDirectory                         RD_MIDDLEWARE_UI = RD_MIDDLEWARE_1;
+ResourceDirEnum                         RD_MIDDLEWARE_UI = RD_MIDDLEWARE_1;
 
 extern void initGUIDriver(Renderer* pRenderer, GUIDriver** ppDriver);
 extern void removeGUIDriver(GUIDriver* pDriver);
 
-typedef struct GpuProfileDrawDesc
-{
-	float        mChildIndent = 25.0f;
-	float        mHeightOffset = 20.0f;
-	TextDrawDesc mDrawDesc = TextDrawDesc(0, 0xFF00CCAA, 15);
-} GpuProfileDrawDesc;
-
-static GpuProfileDrawDesc gDefaultGpuProfileDrawDesc = {};
 static TextDrawDesc       gDefaultTextDrawDesc = TextDrawDesc(0, 0xffffffff, 16);
 
 static void CloneCallbacks(IWidget* pSrc, IWidget* pDst)
@@ -427,7 +418,7 @@ bool UIApp::Init(Renderer* renderer)
 {
 	mShowDemoUiWindow = false;
 
-	pImpl = (struct UIAppImpl*)conf_calloc(1, sizeof(*pImpl));
+	pImpl = conf_new(UIAppImpl);
 	pImpl->pRenderer = renderer;
 
 	pDriver = NULL;
@@ -440,7 +431,7 @@ bool UIApp::Init(Renderer* renderer)
 	if (mFontAtlasSize <= 0) // then we assume we'll only draw debug text in the UI, in which case the atlas size can be kept small
 		mFontAtlasSize = 256;
 
-	pImpl->pFontStash = (Fontstash*)conf_calloc(1, sizeof(Fontstash));
+	pImpl->pFontStash = conf_new(Fontstash);
 	bool success = pImpl->pFontStash->init(renderer, mFontAtlasSize, mFontAtlasSize);
 
 	initGUIDriver(pImpl->pRenderer, &pDriver);
@@ -456,21 +447,20 @@ void UIApp::Exit()
 	RemoveAllGuiComponents();
 
 	pImpl->pFontStash->exit();
-	conf_free(pImpl->pFontStash);
+	conf_delete(pImpl->pFontStash);
 
 	pDriver->exit();
 	removeGUIDriver(pDriver);
 	pDriver = NULL;
 
-	pImpl->~UIAppImpl();
-	conf_free(pImpl);
+	conf_delete(pImpl);
 }
 
 bool UIApp::Load(RenderTarget** rts, uint32_t count)
 { 
 	ASSERT(rts && rts[0]);
-	mWidth = (float)rts[0]->mDesc.mWidth;
-	mHeight = (float)rts[0]->mDesc.mHeight;
+	mWidth = (float)rts[0]->mWidth;
+	mHeight = (float)rts[0]->mHeight;
 
 	bool success = pDriver->load(rts, count);
 	success &= pImpl->pFontStash->load(rts, count);
@@ -484,7 +474,7 @@ void UIApp::Unload()
 	pImpl->pFontStash->unload();
 }
 
-uint32_t UIApp::LoadFont(const char* pFontPath, ResourceDirectory root)
+uint32_t UIApp::LoadFont(const char* pFontPath, ResourceDirEnum root)
 {
 	uint32_t fontID = (uint32_t)pImpl->pFontStash->defineFont("default", pFontPath, root);
 	ASSERT(fontID != -1);
@@ -515,56 +505,9 @@ void UIApp::DrawTextInWorldSpace(Cmd* pCmd, const char* pText, const mat4& matWo
 		pCmd, pText, matProjView, matWorld, pDesc->mFontID, pDesc->mFontColor, pDesc->mFontSize, pDesc->mFontSpacing, pDesc->mFontBlur);
 }
 
-#if defined(__linux__)
-#define sprintf_s sprintf    // On linux, we should use sprintf as sprintf_s is not part of the standard c library
+#if defined(__linux__) || defined(NX64)
+#define sprintf_s sprintf    // On linux and NX, we should use sprintf as sprintf_s is not part of the standard c library
 #endif
-
-
-static void draw_gpu_profile_recurse(
-	Cmd* pCmd, Fontstash* pFontStash, float2& startPos, const GpuProfileDrawDesc* pDrawDesc, struct GpuProfiler* pGpuProfiler,
-	GpuTimerTree* pRoot)
-{
-#if defined(DIRECT3D12) || defined(VULKAN) || defined(DIRECT3D11)
-	if (!pRoot)
-		return;
-
-	float originalX = startPos.getX();
-
-	if (pRoot->mGpuTimer.mIndex > 0 && pRoot != &pGpuProfiler->mRoot)
-	{
-		char   buffer[128];
-		double time = getAverageGpuTime(pGpuProfiler, &pRoot->mGpuTimer);
-		sprintf_s(buffer, "%s -  %f ms", pRoot->mGpuTimer.mName.c_str(), time * 1000.0);
-
-		pFontStash->drawText(
-			pCmd, buffer, startPos.x, startPos.y, pDrawDesc->mDrawDesc.mFontID, pDrawDesc->mDrawDesc.mFontColor,
-			pDrawDesc->mDrawDesc.mFontSize, pDrawDesc->mDrawDesc.mFontSpacing, pDrawDesc->mDrawDesc.mFontBlur);
-		startPos.y += pDrawDesc->mHeightOffset;
-
-		if ((uint32_t)pRoot->mChildren.size())
-			startPos.setX(startPos.getX() + pDrawDesc->mChildIndent);
-	}
-
-	for (uint32_t i = 0; i < (uint32_t)pRoot->mChildren.size(); ++i)
-	{
-		draw_gpu_profile_recurse(pCmd, pFontStash, startPos, pDrawDesc, pGpuProfiler, pRoot->mChildren[i]);
-	}
-
-	startPos.x = originalX;
-#endif
-}
-
-void UIApp::DrawDebugGpuProfile(Cmd * pCmd, const float2& screenCoordsInPx, GpuProfiler* pGpuProfiler, const GpuProfileDrawDesc* pDrawDesc)
-{
-	const GpuProfileDrawDesc* pDesc = pDrawDesc ? pDrawDesc : &gDefaultGpuProfileDrawDesc;
-	float2                    pos = screenCoordsInPx;
-	pImpl->pFontStash->drawText(
-		pCmd, "-----GPU Times-----", pos.x, pos.y, pDesc->mDrawDesc.mFontID, pDesc->mDrawDesc.mFontColor, pDesc->mDrawDesc.mFontSize,
-		pDesc->mDrawDesc.mFontSpacing, pDesc->mDrawDesc.mFontBlur);
-	pos.y += pDesc->mHeightOffset;
-
-	draw_gpu_profile_recurse(pCmd, pImpl->pFontStash, pos, pDesc, pGpuProfiler, &pGpuProfiler->mRoot);
-}
 
 GuiComponent* UIApp::AddGuiComponent(const char* pTitle, const GuiDesc* pDesc)
 {
@@ -582,7 +525,7 @@ GuiComponent* UIApp::AddGuiComponent(const char* pTitle, const GuiDesc* pDesc)
 
 	pComponent->mActive = true;
 	pComponent->mTitle = pTitle;
-
+    pComponent->mAlpha = 1.0f;
 	pImpl->mComponents.emplace_back(pComponent);
 
 	return pComponent;
@@ -623,7 +566,7 @@ void UIApp::RemoveAllGuiComponents()
 
 void UIApp::Update(float deltaTime)
 {
-	if (pImpl->mUpdated)
+	if (pImpl->mUpdated || !pImpl->mComponentsToUpdate.size())
 		return;
 
 	pImpl->mUpdated = true;
@@ -689,7 +632,7 @@ void GuiComponent::RemoveAllWidgets()
 	mWidgetsClone.clear();
 }
 
-#if defined(TARGET_IOS) || defined(__ANDROID__)
+#if defined(TARGET_IOS) || defined(__ANDROID__) || defined(NX64)
 #define TOUCH_INPUT 1
 #endif
 
@@ -700,12 +643,14 @@ bool VirtualJoystickUI::Init(Renderer* renderer, const char* pJoystickTexture, u
 #if TOUCH_INPUT
 	pRenderer = renderer;
 
-    PathHandle joystickTexturePath = fsCopyPathInResourceDirectory((ResourceDirectory)root, pJoystickTexture);
+    PathHandle joystickTexturePath = fsGetPathInResourceDirEnum((ResourceDirEnum)root, pJoystickTexture);
 	TextureLoadDesc loadDesc = {};
+	SyncToken token = {};
     loadDesc.pFilePath = joystickTexturePath;
 	loadDesc.ppTexture = &pTexture;
 	loadDesc.mCreationFlag = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-	addResource(&loadDesc);
+	addResource(&loadDesc, &token, LOAD_PRIORITY_HIGH);
+	waitForToken(&token);
     
 	if (!pTexture)
 	{
@@ -722,26 +667,6 @@ bool VirtualJoystickUI::Init(Renderer* renderer, const char* pJoystickTexture, u
 								ADDRESS_MODE_CLAMP_TO_EDGE,
 								ADDRESS_MODE_CLAMP_TO_EDGE };
 	addSampler(pRenderer, &samplerDesc, &pSampler);
-
-	BlendStateDesc blendStateDesc = {};
-	blendStateDesc.mSrcFactors[0] = BC_SRC_ALPHA;
-	blendStateDesc.mDstFactors[0] = BC_ONE_MINUS_SRC_ALPHA;
-	blendStateDesc.mSrcAlphaFactors[0] = BC_SRC_ALPHA;
-	blendStateDesc.mDstAlphaFactors[0] = BC_ONE_MINUS_SRC_ALPHA;
-	blendStateDesc.mMasks[0] = ALL;
-	blendStateDesc.mRenderTargetMask = BLEND_STATE_TARGET_ALL;
-	blendStateDesc.mIndependentBlend = false;
-	addBlendState(pRenderer, &blendStateDesc, &pBlendAlpha);
-
-	DepthStateDesc depthStateDesc = {};
-	depthStateDesc.mDepthTest = false;
-	depthStateDesc.mDepthWrite = false;
-	addDepthState(pRenderer, &depthStateDesc, &pDepthState);
-
-	RasterizerStateDesc rasterizerStateDesc = {};
-	rasterizerStateDesc.mCullMode = CULL_MODE_NONE;
-	rasterizerStateDesc.mScissor = true;
-	addRasterizerState(pRenderer, &rasterizerStateDesc, &pRasterizerState);
 	/************************************************************************/
 	// Shader
 	/************************************************************************/
@@ -767,9 +692,8 @@ bool VirtualJoystickUI::Init(Renderer* renderer, const char* pJoystickTexture, u
 	vbDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
 	vbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT | BUFFER_CREATION_FLAG_OWN_MEMORY_BIT;
 	vbDesc.mDesc.mSize = 128 * 4 * sizeof(float4);
-	vbDesc.mDesc.mVertexStride = sizeof(float4);
 	vbDesc.ppBuffer = &pMeshBuffer;
-	addResource(&vbDesc);
+	addResource(&vbDesc, NULL, LOAD_PRIORITY_NORMAL);
 	/************************************************************************/
 	// Prepare descriptor sets
 	/************************************************************************/
@@ -786,9 +710,6 @@ void VirtualJoystickUI::Exit()
 #if TOUCH_INPUT
 	removeSampler(pRenderer, pSampler);
 	removeResource(pMeshBuffer);
-	removeRasterizerState(pRasterizerState);
-	removeBlendState(pBlendAlpha);
-	removeDepthState(pDepthState);
 	removeDescriptorSet(pRenderer, pDescriptorSet);
 	removeRootSignature(pRenderer, pRootSignature);
 	removeShader(pRenderer, pShader);
@@ -812,6 +733,23 @@ bool VirtualJoystickUI::Load(RenderTarget* pScreenRT)
 	vertexLayout.mAttribs[1].mBinding = 0;
 	vertexLayout.mAttribs[1].mLocation = 1;
     vertexLayout.mAttribs[1].mOffset = TinyImageFormat_BitSizeOfBlock(TinyImageFormat_R32G32_SFLOAT) / 8;
+	
+	BlendStateDesc blendStateDesc = {};
+	blendStateDesc.mSrcFactors[0] = BC_SRC_ALPHA;
+	blendStateDesc.mDstFactors[0] = BC_ONE_MINUS_SRC_ALPHA;
+	blendStateDesc.mSrcAlphaFactors[0] = BC_SRC_ALPHA;
+	blendStateDesc.mDstAlphaFactors[0] = BC_ONE_MINUS_SRC_ALPHA;
+	blendStateDesc.mMasks[0] = ALL;
+	blendStateDesc.mRenderTargetMask = BLEND_STATE_TARGET_ALL;
+	blendStateDesc.mIndependentBlend = false;
+
+	DepthStateDesc depthStateDesc = {};
+	depthStateDesc.mDepthTest = false;
+	depthStateDesc.mDepthWrite = false;
+
+	RasterizerStateDesc rasterizerStateDesc = {};
+	rasterizerStateDesc.mCullMode = CULL_MODE_NONE;
+	rasterizerStateDesc.mScissor = true;
 
 	PipelineDesc desc = {};
 	desc.mType = PIPELINE_TYPE_GRAPHICS;
@@ -819,19 +757,19 @@ bool VirtualJoystickUI::Load(RenderTarget* pScreenRT)
 	pipelineDesc.mPrimitiveTopo = PRIMITIVE_TOPO_TRI_STRIP;
     pipelineDesc.mDepthStencilFormat = TinyImageFormat_UNDEFINED;
 	pipelineDesc.mRenderTargetCount = 1;
-	pipelineDesc.mSampleCount = pScreenRT->mDesc.mSampleCount;
-	pipelineDesc.mSampleQuality = pScreenRT->mDesc.mSampleQuality;
-	pipelineDesc.pBlendState = pBlendAlpha;
-	pipelineDesc.pColorFormats = &pScreenRT->mDesc.mFormat;
-	pipelineDesc.pDepthState = pDepthState;
-	pipelineDesc.pRasterizerState = pRasterizerState;
+	pipelineDesc.mSampleCount = pScreenRT->mSampleCount;
+	pipelineDesc.mSampleQuality = pScreenRT->mSampleQuality;
+	pipelineDesc.pBlendState = &blendStateDesc;
+	pipelineDesc.pColorFormats = &pScreenRT->mFormat;
+	pipelineDesc.pDepthState = &depthStateDesc;
+	pipelineDesc.pRasterizerState = &rasterizerStateDesc;
 	pipelineDesc.pRootSignature = pRootSignature;
 	pipelineDesc.pShaderProgram = pShader;
 	pipelineDesc.pVertexLayout = &vertexLayout;
 	addPipeline(pRenderer, &desc, &pPipeline);
 
-	mRenderSize[0] = (float)pScreenRT->mDesc.mWidth;
-	mRenderSize[1] = (float)pScreenRT->mDesc.mHeight;
+	mRenderSize[0] = (float)pScreenRT->mWidth;
+	mRenderSize[1] = (float)pScreenRT->mHeight;
 #endif
 	return true;
 }
@@ -850,7 +788,8 @@ void VirtualJoystickUI::Update(float dt)
 bool VirtualJoystickUI::OnMove(uint32_t id, bool press, const float2* vec)
 {
 #if TOUCH_INPUT
-	ASSERT(vec);
+	if (!vec) return false;
+
 
     if (!mSticks[id].mPressed)
     {
@@ -899,27 +838,30 @@ void VirtualJoystickUI::Draw(Cmd* pCmd, const float4& color)
 			float2 joystickCenter = mSticks[i].mStartPos - float2(0.0f, mRenderSize.y * 0.1f);
             float2 joystickPos = joystickCenter - joystickSize * 0.5f;
 
+			const uint32_t vertexStride = sizeof(float4);
+			BufferUpdateDesc updateDesc = { pMeshBuffer, bufferOffset };
+			beginUpdateResource(&updateDesc);
+			TexVertex* vertices = (TexVertex*)updateDesc.pMappedData;
 			// the last variable can be used to create a border
-			TexVertex        vertices[4] = { MAKETEXQUAD(
-				joystickPos.x, joystickPos.y, joystickPos.x + joystickSize.x, joystickPos.y + joystickSize.y, 0) };
-			BufferUpdateDesc updateDesc = { pMeshBuffer, vertices, 0, bufferOffset, sizeof(vertices) };
-			updateResource(&updateDesc);
-			cmdBindVertexBuffer(pCmd, 1, &pMeshBuffer, &bufferOffset);
+			MAKETEXQUAD(vertices, joystickPos.x, joystickPos.y, joystickPos.x + joystickSize.x, joystickPos.y + joystickSize.y, 0);
+			endUpdateResource(&updateDesc, NULL);
+			cmdBindVertexBuffer(pCmd, 1, &pMeshBuffer, &vertexStride, &bufferOffset);
 			cmdDraw(pCmd, 4, 0);
-			bufferOffset += sizeof(vertices);
+			bufferOffset += sizeof(TexVertex) * 4;
 
 			joystickSize = float2(intSide);
 			joystickCenter = mSticks[i].mCurrPos - float2(0.0f, mRenderSize.y * 0.1f);
 			joystickPos = float2(joystickCenter.getX(), joystickCenter.getY()) - 0.5f * joystickSize;
 
+			updateDesc = { pMeshBuffer, bufferOffset };
+			beginUpdateResource(&updateDesc);
+			TexVertex* verticesInner = (TexVertex*)updateDesc.pMappedData;
 			// the last variable can be used to create a border
-			TexVertex verticesInner[4] = { MAKETEXQUAD(
-				joystickPos.x, joystickPos.y, joystickPos.x + joystickSize.x, joystickPos.y + joystickSize.y, 0) };
-			updateDesc = { pMeshBuffer, verticesInner, 0, bufferOffset, sizeof(verticesInner) };
-			updateResource(&updateDesc);
-			cmdBindVertexBuffer(pCmd, 1, &pMeshBuffer, &bufferOffset);
+			MAKETEXQUAD(verticesInner, joystickPos.x, joystickPos.y, joystickPos.x + joystickSize.x, joystickPos.y + joystickSize.y, 0);
+			endUpdateResource(&updateDesc, NULL);
+			cmdBindVertexBuffer(pCmd, 1, &pMeshBuffer, &vertexStride, &bufferOffset);
 			cmdDraw(pCmd, 4, 0);
-			bufferOffset += sizeof(verticesInner);
+			bufferOffset += sizeof(TexVertex) * 4;
 		}
 	}
 #endif

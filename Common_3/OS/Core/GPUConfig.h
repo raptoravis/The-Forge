@@ -6,7 +6,7 @@
 #include "../Interfaces/IFileSystem.h"
 #include "../../Renderer/IRenderer.h"
 
-static bool parseConfigLine(
+bool parseConfigLine(
 	eastl::string line, eastl::string& vendorId, eastl::string& deviceId, eastl::string& revId, eastl::string& deviceName,
     eastl::string& presetLevel)
 {
@@ -52,7 +52,7 @@ static bool parseConfigLine(
 	return true;
 }
 
-static GPUPresetLevel stringToPresetLevel(eastl::string& presetLevel)
+GPUPresetLevel stringToPresetLevel(eastl::string& presetLevel)
 {
 	if (presetLevel == "office")
 		return GPU_PRESET_OFFICE;
@@ -68,9 +68,22 @@ static GPUPresetLevel stringToPresetLevel(eastl::string& presetLevel)
 	return GPU_PRESET_NONE;
 }
 
-#ifndef METAL
-static GPUPresetLevel
-	getSinglePresetLevel(eastl::string line, const eastl::string& inVendorId, const eastl::string& inModelId, const eastl::string& inRevId)
+const char* presetLevelToString(GPUPresetLevel preset)
+{
+	switch (preset)
+	{
+	case GPU_PRESET_NONE: return "";
+	case GPU_PRESET_OFFICE: return "office";
+	case GPU_PRESET_LOW: return "low";
+	case GPU_PRESET_MEDIUM: return "medium";
+	case GPU_PRESET_HIGH: return "high";
+	case GPU_PRESET_ULTRA: return "ultra";
+	default: return NULL;
+	}
+}
+
+#if !defined(METAL) && !defined(NX64)
+GPUPresetLevel getSinglePresetLevel(eastl::string line, const eastl::string& inVendorId, const eastl::string& inModelId, const eastl::string& inRevId)
 {
 	eastl::string vendorId;
 	eastl::string deviceId;
@@ -96,9 +109,9 @@ static GPUPresetLevel
 }
 #endif
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(NX64)
 //TODO: Add name matching as well.
-static void checkForPresetLevel(eastl::string line, Renderer* pRenderer)
+void checkForPresetLevel(eastl::string line, Renderer* pRenderer, uint32_t gpuCount, GPUSettings* pGpuSettings)
 {
 	eastl::string vendorId;
 	eastl::string deviceId;
@@ -110,9 +123,9 @@ static void checkForPresetLevel(eastl::string line, Renderer* pRenderer)
 		return;
 
 	//search if any of the current gpu's match the current gpu cfg entry
-	for (uint32_t i = 0; i < pRenderer->mNumOfGPUs; i++)
+	for (uint32_t i = 0; i < gpuCount; i++)
 	{
-		GPUSettings* currentSettings = &pRenderer->mGpuSettings[i];
+		GPUSettings* currentSettings = &pGpuSettings[i];
 		//check if current vendor line is one of the selected gpu's
 		//compare both ModelId and VendorId
 		if (strcmp(currentSettings->mGpuVendorPreset.mVendorId, vendorId.c_str()) == 0 &&
@@ -133,9 +146,8 @@ static void checkForPresetLevel(eastl::string line, Renderer* pRenderer)
 }
 #endif
 
-#ifndef METAL
-#ifndef __ANDROID__
-static bool checkForActiveGPU(eastl::string line, GPUVendorPreset& pActiveGpu)
+#if !defined(METAL) && !defined(__ANDROID__) && !defined(NX64)
+bool checkForActiveGPU(eastl::string line, GPUVendorPreset& pActiveGpu)
 {
 	eastl::string vendorId;
 	eastl::string deviceId;
@@ -158,13 +170,12 @@ static bool checkForActiveGPU(eastl::string line, GPUVendorPreset& pActiveGpu)
 	return true;
 }
 #endif
-#endif
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(NX64)
 //Reads the gpu config and sets the preset level of all available gpu's
-static void setGPUPresetLevel(Renderer* pRenderer)
+void setGPUPresetLevel(Renderer* pRenderer, uint32_t gpuCount, GPUSettings* pGpuSettings)
 {
-	FileStream* fh = fsOpenFileInResourceDirectory(RD_GPU_CONFIG, "gpu.cfg", FM_READ);
+	FileStream* fh = fsOpenFileInResourceDirEnum(RD_GPU_CONFIG, "gpu.cfg", FM_READ);
 	if (!fh)
 	{
 		LOGF(LogLevel::eWARNING, "gpu.cfg could not be found, setting preset to Low as a default.");
@@ -175,7 +186,7 @@ static void setGPUPresetLevel(Renderer* pRenderer)
 	while (!fsStreamAtEnd(fh))
 	{
         fsReadFromStreamLine(fh, configStr, 2048);
-		checkForPresetLevel(configStr, pRenderer);
+		checkForPresetLevel(configStr, pRenderer, gpuCount, pGpuSettings);
 		// Do something with the tok
 	}
 
@@ -184,9 +195,9 @@ static void setGPUPresetLevel(Renderer* pRenderer)
 #endif
 
 
-#ifdef __ANDROID__
+#if defined(__ANDROID__) || defined(NX64)
 //Reads the gpu config and sets the preset level of all available gpu's
-static GPUPresetLevel getGPUPresetLevel(const eastl::string vendorId, const eastl::string modelId, const eastl::string revId)
+GPUPresetLevel getGPUPresetLevel(const eastl::string vendorId, const eastl::string modelId, const eastl::string revId)
 {
 	LOGF(LogLevel::eINFO, "No gpu.cfg support. Preset set to Low");
 	GPUPresetLevel foundLevel = GPU_PRESET_LOW;
@@ -195,12 +206,12 @@ static GPUPresetLevel getGPUPresetLevel(const eastl::string vendorId, const east
 #endif
 
 
-#if !defined(METAL) && !defined(__ANDROID__)
+#if !defined(METAL) && !defined(__ANDROID__) && !defined(NX64)
 //Reads the gpu config and sets the preset level of all available gpu's
-static GPUPresetLevel getGPUPresetLevel(const eastl::string vendorId, const eastl::string modelId, const eastl::string revId)
+GPUPresetLevel getGPUPresetLevel(const eastl::string vendorId, const eastl::string modelId, const eastl::string revId)
 {
 
-	FileStream* fh = fsOpenFileInResourceDirectory(RD_GPU_CONFIG, "gpu.cfg", FM_READ_BINARY);
+	FileStream* fh = fsOpenFileInResourceDirEnum(RD_GPU_CONFIG, "gpu.cfg", FM_READ_BINARY);
 	if (!fh)
 	{
 		LOGF(LogLevel::eWARNING, "gpu.cfg could not be found, setting preset to Low as a default.");
@@ -226,9 +237,9 @@ static GPUPresetLevel getGPUPresetLevel(const eastl::string vendorId, const east
 }
 
 #if defined(AUTOMATED_TESTING) && defined(ACTIVE_TESTING_GPU)
-static bool getActiveGpuConfig(GPUVendorPreset& pActiveGpu)
+bool getActiveGpuConfig(GPUVendorPreset& pActiveGpu)
 {
-	FileStream* fh = fsOpenFileInResourceDirectory(RD_GPU_CONFIG, "activeTestingGpu.cfg", FM_READ_BINARY);
+	FileStream* fh = fsOpenFileInResourceDirEnum(RD_GPU_CONFIG, "activeTestingGpu.cfg", FM_READ_BINARY);
 	if (!fh)
 	{
 		LOGF(LogLevel::eINFO, "activeTestingGpu.cfg could not be found, Using default GPU.");

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -25,7 +25,7 @@
 #pragma once
 
 #include "../../Renderer/IRenderer.h"
-#include "../../Renderer/ResourceLoader.h"
+#include "../../Renderer/IResourceLoader.h"
 #include "../Interfaces/ILog.h"
 
 #define IMEMORY_FROM_HEADER
@@ -60,7 +60,7 @@ static inline void addGPURingBuffer(Renderer* pRenderer, const BufferDesc* pBuff
 	BufferLoadDesc loadDesc = {};
 	loadDesc.mDesc = *pBufferDesc;
 	loadDesc.ppBuffer = &pRingBuffer->pBuffer;
-	addResource(&loadDesc);
+	addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
 
 	*ppRingBuffer = pRingBuffer;
 }
@@ -78,19 +78,20 @@ static inline void addUniformGPURingBuffer(Renderer* pRenderer, uint32_t require
 	BufferDesc ubDesc = {};
 #if defined(DIRECT3D11)
 	ubDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_ONLY;
+	ubDesc.mFlags = BUFFER_CREATION_FLAG_NO_DESCRIPTOR_VIEW_CREATION;
 #else
 	ubDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	ubDesc.mMemoryUsage = memoryUsage;
-#endif
 	ubDesc.mFlags = (ubDesc.mMemoryUsage != RESOURCE_MEMORY_USAGE_GPU_ONLY ? BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT : BUFFER_CREATION_FLAG_NONE) |
 		BUFFER_CREATION_FLAG_NO_DESCRIPTOR_VIEW_CREATION;
+#endif
 	if (ownMemory)
 		ubDesc.mFlags |= BUFFER_CREATION_FLAG_OWN_MEMORY_BIT;
 	ubDesc.mSize = maxUniformBufferSize;
 	BufferLoadDesc loadDesc = {};
 	loadDesc.mDesc = ubDesc;
 	loadDesc.ppBuffer = &pRingBuffer->pBuffer;
-	addResource(&loadDesc);
+	addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
 
 	*ppRingBuffer = pRingBuffer;
 }

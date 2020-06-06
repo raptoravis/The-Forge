@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -84,7 +84,9 @@ THE SOFTWARE.
 // We don't need to include this. It does no harm, but no use either.
 #include "simplexnoise1234.h"
 
+#ifdef _MSC_VER
 #pragma warning(disable : 4244)    // conversion double -> float
+#endif
 
 #define FASTFLOOR(x) (((x) > 0) ? ((int)x) : (((int)x) - 1))
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -31,6 +31,8 @@
 #define WIN32_LEAN_AND_MEAN 1
 #endif
 #include <windows.h>
+#undef min
+#undef max
 #endif
 
 #if defined(__APPLE__)
@@ -75,19 +77,29 @@ typedef uint64_t uint64;
 #include <unistd.h>
 #endif
 
-#ifndef _WIN32
+#if !defined(_WIN32)
 #define stricmp(a, b) strcasecmp(a, b)
+#if !defined(ORBIS)
 #define vsprintf_s vsnprintf
 #define strncpy_s strncpy
 #endif
+#endif
 
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(NX64)
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 #endif
 
 #if defined(_DURANGO)
 #define stricmp(a, b) _stricmp(a, b)
+#endif
+
+#ifndef FORGE_DEBUG
+#if defined(DEBUG) || defined(_DEBUG) || defined(AUTOMATED_TESTING)
+#define FORGE_DEBUG 1
+#else
+#define FORGE_DEBUG 0
+#endif
 #endif
 
 typedef void* IconHandle;
@@ -125,6 +137,7 @@ struct WindowsDesc;
 struct WindowCallbacks
 {
 	void    (*onResize)(WindowsDesc* window, int32_t newSizeX, int32_t newSizeY);
+	void	(*setCursor)();
 	int32_t (*onHandleMessage)(WindowsDesc* window, void* msg);
 };
 
@@ -147,6 +160,8 @@ typedef struct WindowsDesc
 	bool                      maximized;
 	bool                      minimized;
 	bool                      hide;
+	bool                      noresizeFrame;
+	bool											borderlessWindow;
 } WindowsDesc;
 
 typedef struct Resolution
@@ -206,6 +221,11 @@ typedef unsigned long DWORD;
 typedef unsigned int UINT;
 typedef int64_t int64;
 typedef uint64_t uint64;
+#elif defined(NX64)
+typedef unsigned long DWORD;
+typedef unsigned int UINT;
+typedef long long int int64;
+typedef uint64_t uint64;
 #else
 typedef signed long long   int64;
 typedef unsigned long long uint64;
@@ -214,7 +234,9 @@ typedef unsigned long long uint64;
 typedef uint8        ubyte;
 typedef uint16       ushort;
 typedef unsigned int uint;
+#ifndef _WIN32
 typedef const char * LPCSTR, *PCSTR;
+#endif
 
 // API functions
 void requestShutdown();
@@ -224,6 +246,7 @@ void openWindow(const char* app_name, WindowsDesc* winDesc);
 void closeWindow(const WindowsDesc* winDesc);
 void setWindowRect(WindowsDesc* winDesc, const RectDesc& rect);
 void setWindowSize(WindowsDesc* winDesc, unsigned width, unsigned height);
+void toggleBorderless(WindowsDesc* winDesc, unsigned width, unsigned height);
 void toggleFullscreen(WindowsDesc* winDesc);
 void showWindow(WindowsDesc* winDesc);
 void hideWindow(WindowsDesc* winDesc);

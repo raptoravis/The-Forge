@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -26,27 +26,38 @@
 #define ZipFileSystem_h
 
 #include "FileSystemInternal.h"
+#include "../../ThirdParty/OpenSource/EASTL/string_hash_map.h"
 
-typedef struct zip zip_t;
+typedef struct zip_t zip_t;
 
 class ZipFileSystem: public FileSystem
 {
-	zip_t*			pZipFile;
-    Path*           pPathInParent;
-	FileSystemFlags mFlags;
-	time_t          mCreationTime;
-	time_t          mLastAccessedTime;
+	struct ZipEntry
+	{
+		time_t   mTime;
+		ssize_t  mSize;
+		uint32_t mIndex : 31;
+		uint32_t mDirectory : 1;
+	};
+
+	zip_t*                           pZipFile;
+	Path*                            pPathInParent;
+	FileSystemFlags                  mFlags;
+	time_t                           mCreationTime;
+	eastl::string_hash_map<ZipEntry> mEntries;
+	time_t                           mLastAccessedTime;
 
 public:
-    ZipFileSystem(const Path* pathInParent, zip_t* zipFile, FileSystemFlags flags, time_t creationTime, time_t lastAccessedTime);
+	ZipFileSystem(const Path* pathInParent, zip_t* zipFile, FileSystemFlags flags, time_t creationTime, time_t lastAccessedTime);
 	~ZipFileSystem();
 
 	static ZipFileSystem* CreateWithRootAtPath(const Path* rootPath, FileSystemFlags flags);
-    
-    Path*  CopyPathInParent() const override;
+
+	Path*  CopyPathInParent() const override;
 	char   GetPathDirectorySeparator() const override;
-	size_t GetRootPathLength() const override;
-	
+	size_t GetDefaultRootPathLength() const override;
+	size_t GetRootPathLength(const Path * path) const override;
+
 	bool   IsReadOnly() const override;
 	bool   IsCaseSensitive() const override;
 

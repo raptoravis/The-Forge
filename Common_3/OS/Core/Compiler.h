@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -30,6 +30,10 @@
 //For getting rid of unreferenced parameter warnings
 #ifdef _MSC_VER    //If on Visual Studio
 #define UNREF_PARAM(x) (x)
+#elif defined(ORBIS)
+#define UNREF_PARAM(x) ((void)(x))
+#elif defined(__APPLE__)
+#define UNREF_PARAM(x) ((void)(x))
 #else
 //Add more compilers and platforms as we need them
 #define UNREF_PARAM(x)
@@ -63,3 +67,6 @@
 #define DEFINE_ALIGNED(def, a) alignas(a) def
 #endif
 #endif
+
+// Generates a compile error if the expression evaluates to false
+#define COMPILE_ASSERT(exp) static_assert((exp), #exp)

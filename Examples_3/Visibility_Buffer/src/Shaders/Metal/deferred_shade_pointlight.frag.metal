@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -30,6 +30,7 @@ using namespace metal;
 
 #include "shader_defs.h"
 #include "shading.h"
+#include "deferred_shade_pointlight.h"
 
 struct VSInput
 {
@@ -43,38 +44,10 @@ struct VSOutput
     float3 lightPos;
 };
 
-struct RootConstantDrawSceneData
-{
-	packed_float4 lightColor;
-	uint lightingMode;
-	uint outputMode;
-	packed_float4 CameraPlane; //x : near, y : far
-};
-
-struct FSData {
-#if SAMPLE_COUNT > 1
-    texture2d_ms<float,access::read> gBufferColor;
-    texture2d_ms<float,access::read> gBufferNormal;
-    texture2d_ms<float,access::read> gBufferSpecular;
-    texture2d_ms<float,access::read> gBufferSimulation;
-    depth2d_ms<float,access::read> gBufferDepth;
-#else
-    texture2d<float,access::read> gBufferColor;
-    texture2d<float,access::read> gBufferNormal;
-    texture2d<float,access::read> gBufferSpecular;
-    texture2d<float,access::read> gBufferSimulation ;
-    depth2d<float,access::read> gBufferDepth;
-#endif
-};
-
-struct FSDataPerFrame {
-    constant PerFrameConstants& uniforms;
-};
-
 fragment float4 stageMain(VSOutput input                                        [[stage_in]],
                           uint32_t sampleID                                     [[sample_id]],
-constant FSData& fsData [[buffer(UPDATE_FREQ_NONE)]],
-constant FSDataPerFrame& fsDataPerFrame [[buffer(UPDATE_FREQ_PER_FRAME)]]
+constant ArgData& fsData [[buffer(UPDATE_FREQ_NONE)]],
+constant ArgDataPerFrame& fsDataPerFrame [[buffer(UPDATE_FREQ_PER_FRAME)]]
 )
 {
 	float4 albedoData = fsData.gBufferColor.read(uint2(input.position.xy), sampleID);

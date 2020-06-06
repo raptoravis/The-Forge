@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -28,17 +28,7 @@
 using namespace metal;
 
 #include "shader_defs.h"
-
-struct CSData {
-    constant uint* materialProps                                               [[id(0)]];
-};
-
-struct CSDataPerFrame {
-    device uint* indirectMaterialBuffer;
-    device atomic_uint* indirectDrawArgsBufferAlpha [NUM_CULLING_VIEWPORTS];
-    device atomic_uint* indirectDrawArgsBufferNoAlpha [NUM_CULLING_VIEWPORTS];
-    device UncompactedDrawArguments* uncompactedDrawArgs[NUM_CULLING_VIEWPORTS];
-};
+#include "cull_argument_buffers.h"
 
 //[numthreads(256, 1, 1)]
 kernel void stageMain(

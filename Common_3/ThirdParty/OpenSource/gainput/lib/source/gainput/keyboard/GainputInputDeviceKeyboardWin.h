@@ -17,6 +17,7 @@ public:
 		manager_(manager),
 		device_(device),
 		textInputEnabled_(true),
+		textCount_(0),
 		dialect_(manager_.GetAllocator()),
 		state_(&state),
 		previousState_(&previousState),
@@ -58,6 +59,7 @@ public:
 
 		dialect_[VK_DECIMAL] = KeyPeriod;
 		dialect_[VK_SUBTRACT] = KeyKpSubtract;
+		dialect_[VK_ADD] = KeyKpAdd;
 		dialect_[VK_NUMPAD0] = KeyKpInsert;
 		dialect_[VK_NUMPAD1] = KeyKpEnd;
 		dialect_[VK_NUMPAD2] = KeyKpDown;
@@ -137,8 +139,11 @@ public:
 		dialect_[VK_OEM_3] = KeyExtra5;
 		dialect_[VK_OEM_1] = KeyExtra6;
 
-		dialect_[0xff] = KeyFn; // Marked as "reserved".
+		//added
+		dialect_[VK_MULTIPLY] = KeyKpMultiply;
 
+		dialect_[0xff] = KeyFn; // Marked as "reserved".
+		
 		memset(textBuffer_, 0, sizeof(textBuffer_));
 	}
 

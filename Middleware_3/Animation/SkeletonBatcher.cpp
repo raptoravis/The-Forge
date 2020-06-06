@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -32,6 +32,8 @@ void SkeletonBatcher::Initialize(const SkeletonRenderDesc& skeletonRenderDesc)
 	mRootSignature = skeletonRenderDesc.mRootSignature;
 	mJointVertexBuffer = skeletonRenderDesc.mJointVertexBuffer;
 	mNumJointPoints = skeletonRenderDesc.mNumJointPoints;
+	mJointVertexStride = skeletonRenderDesc.mJointVertexStride;
+	mBoneVertexStride = skeletonRenderDesc.mBoneVertexStride;
 
 	// 2 because updates buffer twice per instanced draw call: one for joints and one for bones
 	DescriptorSetDesc setDesc = { mRootSignature, DESCRIPTOR_UPDATE_FREQ_PER_DRAW, MAX_BATCHES * 2 * ImageCount };
@@ -61,7 +63,7 @@ void SkeletonBatcher::Initialize(const SkeletonRenderDesc& skeletonRenderDesc)
 		for (uint32_t j = 0; j < MAX_BATCHES; ++j)
 		{
 			ubDesc.ppBuffer = &mProjViewUniformBufferJoints[i][j];
-			addResource(&ubDesc);
+			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 
 			params[0].ppBuffers = &mProjViewUniformBufferJoints[i][j];
 			updateDescriptorSet(mRenderer, (i * (MAX_BATCHES * 2)) + (j * 2 + 0), pDescriptorSet, 1, params);
@@ -69,7 +71,7 @@ void SkeletonBatcher::Initialize(const SkeletonRenderDesc& skeletonRenderDesc)
 			if (mDrawBones)
 			{
 				ubDesc.ppBuffer = &mProjViewUniformBufferBones[i][j];
-				addResource(&ubDesc);
+				addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
 
 				params[0].ppBuffers = &mProjViewUniformBufferBones[i][j];
 				updateDescriptorSet(mRenderer, (i * (MAX_BATCHES * 2)) + (j * 2 + 1), pDescriptorSet, 1, params);
@@ -161,13 +163,17 @@ void SkeletonBatcher::SetPerInstanceUniforms(const uint32_t& frameIndex, int num
 
 				unsigned int currBatch = mBatchCounts[frameIndex];
 
-				BufferUpdateDesc viewProjCbvJoints = { mProjViewUniformBufferJoints[frameIndex][currBatch], &mUniformDataJoints };
-				updateResource(&viewProjCbvJoints);
+				BufferUpdateDesc viewProjCbvJoints = { mProjViewUniformBufferJoints[frameIndex][currBatch] };
+				beginUpdateResource(&viewProjCbvJoints);
+				memcpy(viewProjCbvJoints.pMappedData, &mUniformDataJoints, sizeof(mUniformDataJoints));
+				endUpdateResource(&viewProjCbvJoints, NULL);
 
 				if (mDrawBones)
 				{
-					BufferUpdateDesc viewProjCbvBones = { mProjViewUniformBufferBones[frameIndex][currBatch], &mUniformDataBones };
-					updateResource(&viewProjCbvBones);
+					BufferUpdateDesc viewProjCbvBones = { mProjViewUniformBufferBones[frameIndex][currBatch] };
+					beginUpdateResource(&viewProjCbvBones);
+					memcpy(viewProjCbvBones.pMappedData, &mUniformDataBones, sizeof(mUniformDataBones));
+					endUpdateResource(&viewProjCbvBones, NULL);
 				}
 
 				// Increment the total batch count for this frame index
@@ -205,7 +211,7 @@ void SkeletonBatcher::Draw(Cmd* cmd, const uint32_t& frameIndex)
 
 	// Joints
 	cmdBeginDebugMarker(cmd, 1, 0, 1, "Draw Skeletons Joints");
-	cmdBindVertexBuffer(cmd, 1, &mJointVertexBuffer, NULL);
+	cmdBindVertexBuffer(cmd, 1, &mJointVertexBuffer, &mJointVertexStride, NULL);
 
 	// for each batch of joints
 	for (unsigned int batchIndex = 0; batchIndex < numBatches; batchIndex++)
@@ -225,11 +231,10 @@ void SkeletonBatcher::Draw(Cmd* cmd, const uint32_t& frameIndex)
 	}
 	cmdEndDebugMarker(cmd);
 
-
 	// Bones
 	if (mDrawBones)
 	{
-		cmdBindVertexBuffer(cmd, 1, &mBoneVertexBuffer, NULL);
+		cmdBindVertexBuffer(cmd, 1, &mBoneVertexBuffer, &mBoneVertexStride, NULL);
 		cmdBeginDebugMarker(cmd, 1, 0, 1, "Draw Skeletons Bones");
 
 		// for each batch of bones

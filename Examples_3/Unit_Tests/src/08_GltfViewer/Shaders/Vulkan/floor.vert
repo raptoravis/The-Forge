@@ -15,15 +15,16 @@ vec4 MulMat(mat4 lhs, vec4 rhs)
 
 layout(location = 0) in vec3 POSITION;
 layout(location = 1) in vec2 TEXCOORD0;
-
-layout(location = 0) out vec3 vertOutput_WorldPos;
+layout(location = 0) out vec3 vertOutput_POSITION;
 layout(location = 1) out vec2 vertOutput_TEXCOORD;
 
-layout(UPDATE_FREQ_PER_FRAME, binding = 15) uniform cbPerFrame
+layout(row_major, set = 1, binding = 0) uniform cbPerPass
 {
-    mat4 worldMat;
-    mat4 projViewMat;
-    vec4 screenSize;
+    mat4 projView;
+    mat4 shadowLightViewProj;
+    vec4 camPos;
+    vec4 lightColor[4];
+    vec4 lightDirection[3];
 };
 
 struct VSInput
@@ -34,17 +35,17 @@ struct VSInput
 struct VSOutput
 {
     vec4 Position;
-	vec3 WorldPos;
+    vec3 WorldPos;
     vec2 TexCoord;
 };
 VSOutput HLSLmain(VSInput input1)
 {
     VSOutput Out;
-    vec4 worldPos	=	vec4(input1.Position, 1.0);
-	worldPos		=	worldMat * worldPos;
-    Out.Position	=	projViewMat * worldPos;
-	Out.WorldPos	=	worldPos.xyz;
-    Out.TexCoord	=	input1.TexCoord;
+    vec4 worldPos = vec4((input1).Position, 1.0);
+    ((worldPos).xyz *= vec3(3.0));
+    ((Out).Position = MulMat(projView,worldPos));
+    ((Out).WorldPos = (worldPos).xyz);
+    ((Out).TexCoord = (input1).TexCoord);
     return Out;
 }
 void main()
@@ -54,6 +55,6 @@ void main()
     input1.TexCoord = TEXCOORD0;
     VSOutput result = HLSLmain(input1);
     gl_Position = result.Position;
-	vertOutput_WorldPos = result.WorldPos;
+    vertOutput_POSITION = result.WorldPos;
     vertOutput_TEXCOORD = result.TexCoord;
 }

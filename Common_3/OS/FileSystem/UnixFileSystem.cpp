@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -36,9 +36,14 @@ bool UnixFileSystem::IsReadOnly() const { return false; }
 
 char UnixFileSystem::GetPathDirectorySeparator() const { return '/'; }
 
-size_t UnixFileSystem::GetRootPathLength() const
+size_t UnixFileSystem::GetDefaultRootPathLength() const
 {
 	return 1;    // A single /
+}
+
+size_t UnixFileSystem::GetRootPathLength(const Path * path) const
+{
+	return GetDefaultRootPathLength();
 }
 
 bool UnixFileSystem::FormRootPath(const char* absolutePathString, Path* path, size_t* pathComponentOffset) const
@@ -64,7 +69,7 @@ FileStream* UnixFileSystem::OpenFile(const Path* filePath, FileMode mode) const
 		return NULL;
 	}
 
-	return conf_new(SystemFileStream, file, mode);
+	return conf_new(SystemFileStream, file, mode, filePath);
 }
 
 time_t UnixFileSystem::GetCreationTime(const Path* filePath) const
@@ -93,13 +98,13 @@ time_t UnixFileSystem::GetLastModifiedTime(const Path* filePath) const
 
 bool UnixFileSystem::CreateDirectory(const Path* directoryPath) const
 {
-	if (FileExists(directoryPath))
+	if (IsDirectory(directoryPath))
 	{
 		return false;
 	}
 
 	// Recursively create all parent directories.
-	if (Path* parentPath = fsCopyParentPath(directoryPath))
+	if (Path* parentPath = fsGetParentPath(directoryPath))
 	{
 		CreateDirectory(parentPath);
         fsFreePath(parentPath);
@@ -114,16 +119,23 @@ bool UnixFileSystem::CreateDirectory(const Path* directoryPath) const
 	return true;
 }
 
-bool UnixFileSystem::FileExists(const Path* path) const { return access(fsGetPathAsNativeString(path), F_OK) != -1; }
+bool UnixFileSystem::FileExists(const Path* path) const
+{
+#if defined(ORBIS)
+	struct stat orbis_file_stats;
+	int32_t ret = stat(fsGetPathAsNativeString(path), &orbis_file_stats);
+	return ret == 0;
+#else
+	return access(fsGetPathAsNativeString(path), F_OK) != -1;
+#endif
+}
 
 bool UnixFileSystem::IsDirectory(const Path* path) const
 {
 	struct stat s;
-	if (stat(fsGetPathAsNativeString(path), &s) == 0 && (s.st_mode & S_IFDIR))
-	{
-		return true;
-	}
-	return false;
+	if (stat(fsGetPathAsNativeString(path), &s))
+		return false;
+	return (s.st_mode & S_IFDIR) != 0;
 }
 
 bool UnixFileSystem::DeleteFile(const Path* path) const

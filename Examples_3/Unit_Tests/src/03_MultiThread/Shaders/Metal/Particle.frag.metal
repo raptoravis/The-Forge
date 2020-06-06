@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -49,7 +49,15 @@ struct ParticleTextureData
 };
 
 struct FSData {
-    sampler uSampler0                                          [[id(0)]];
+    sampler uSkyboxSampler                   ;
+    texture2d<float,access::sample> RightText;
+    texture2d<float,access::sample> LeftText ;
+    texture2d<float,access::sample> TopText  ;
+    texture2d<float,access::sample> BotText  ;
+    texture2d<float,access::sample> FrontText;
+    texture2d<float,access::sample> BackText ;
+	
+    sampler uSampler0;
     texture1d<float,access::sample> uTex0[5];
 };
 

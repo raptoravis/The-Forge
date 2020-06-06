@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of TheForge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -26,14 +26,7 @@
 using namespace metal;
 
 #include "shader_defs.h"
-
-struct PackedVertexPosData {
-    packed_float3 position;
-};
-
-struct PackedVertexTexcoord {
-    packed_float2 texCoord;
-};
+#include "packing.h"
 
 struct VSOut {
     float4 position [[position]];
@@ -56,7 +49,7 @@ struct IndirectDrawArguments
 struct VSInput
 {
 	float4 Position [[attribute(UNIT_VBPASS_POSITION)]];
-	float2 TexCoord [[attribute(UNIT_VBPASS_TEXCOORD)]];
+	uint TexCoord [[attribute(UNIT_VBPASS_TEXCOORD)]];
 };
 
 vertex VSOut stageMain(
@@ -66,6 +59,6 @@ vertex VSOut stageMain(
 {
 	VSOut output;
 	output.position = uniforms.transform[VIEW_SHADOW].mvp * input.Position;
-	output.texCoord = input.TexCoord;
+	output.texCoord = unpack2Floats(input.TexCoord);
 	return output;
 }

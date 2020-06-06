@@ -13,8 +13,8 @@
 		28A5ADBC201F7587000E571F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 28A5ADBA201F7587000E571F /* LaunchScreen.storyboard */; };
 		28A5ADC6201F75E0000E571F /* TitilliumText in Resources */ = {isa = PBXBuildFile; fileRef = 28A5ADC5201F75E0000E571F /* TitilliumText */; };
 		28A5ADCD201F761A000E571F /* 07_Tessellation.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 283F14712019EB8C005026E7 /* 07_Tessellation.cpp */; };
-		5B17815322A5C72B00991DCB /* profile.vert.metal in CopyFiles */ = {isa = PBXBuildFile; fileRef = 5B17815122A5C72B00991DCB /* profile.vert.metal */; };
-		5B17815422A5C72B00991DCB /* profile.frag.metal in CopyFiles */ = {isa = PBXBuildFile; fileRef = 5B17815222A5C72B00991DCB /* profile.frag.metal */; };
+
+
 		5C172F8F21414A9C0074EE71 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 5C172F8D21414A9B0074EE71 /* AppDelegate.m */; };
 		5C172F9821414AB70074EE71 /* libThe-Forge.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C172F9521414AA80074EE71 /* libThe-Forge.a */; };
 		5C17304021414E610074EE71 /* libThe-Forge_iOS.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C17303F21414E610074EE71 /* libThe-Forge_iOS.a */; };
@@ -42,8 +42,6 @@
 		B21F76DE21420EC000DF2297 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B21F76DB21420EC000DF2297 /* Metal.framework */; };
 		D28782F01F0A7F52004DC624 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D28782EF1F0A7F52004DC624 /* Assets.xcassets */; };
 		D2E631E11F3472DF005BFBA7 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = D2E631DF1F3472DF005BFBA7 /* MainMenu.xib */; };
-		E970F791233C5EE7009FE7C4 /* libbz2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E970F790233C5EE2009FE7C4 /* libbz2.tbd */; };
-		E970F793233C5EF1009FE7C4 /* libbz2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E970F792233C5EEB009FE7C4 /* libbz2.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -104,8 +102,8 @@
 			dstPath = Shaders/Metal;
 			dstSubfolderSpec = 7;
 			files = (
-				5B17815322A5C72B00991DCB /* profile.vert.metal in CopyFiles */,
-				5B17815422A5C72B00991DCB /* profile.frag.metal in CopyFiles */,
+
+
 				5CA80F8C21F0A1EF00C99983 /* fontstash.frag.metal in CopyFiles */,
 				5CA80F8D21F0A1EF00C99983 /* fontstash2D.vert.metal in CopyFiles */,
 				5CA80F8E21F0A1EF00C99983 /* fontstash3D.vert.metal in CopyFiles */,
@@ -134,8 +132,8 @@
 		28A5ADC7201F75F0000E571F /* grass.domain.vert.metal */ = {isa = PBXFileReference; explicitFileType = sourcecode.metal; fileEncoding = 4; name = grass.domain.vert.metal; path = ../../../src/07_Tessellation/Shaders/Metal/grass.domain.vert.metal; sourceTree = "<group>"; };
 		28A5ADC8201F75F0000E571F /* compute.comp.metal */ = {isa = PBXFileReference; explicitFileType = sourcecode.metal; fileEncoding = 4; name = compute.comp.metal; path = ../../../src/07_Tessellation/Shaders/Metal/compute.comp.metal; sourceTree = "<group>"; };
 		28A5ADC9201F75F0000E571F /* grass_verthull.comp.metal */ = {isa = PBXFileReference; explicitFileType = sourcecode.metal; fileEncoding = 4; name = grass_verthull.comp.metal; path = ../../../src/07_Tessellation/Shaders/Metal/grass_verthull.comp.metal; sourceTree = "<group>"; };
-		5B17815122A5C72B00991DCB /* profile.vert.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; name = profile.vert.metal; path = ../../src/07_Tessellation/Shaders/Metal/profile.vert.metal; sourceTree = "<group>"; };
-		5B17815222A5C72B00991DCB /* profile.frag.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; name = profile.frag.metal; path = ../../src/07_Tessellation/Shaders/Metal/profile.frag.metal; sourceTree = "<group>"; };
+
+
 		5C172F8D21414A9B0074EE71 /* AppDelegate.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = AppDelegate.m; path = ../../../../../Common_3/OS/Darwin/macOSAppDelegate.m; sourceTree = "<group>"; };
 		5C172F8E21414A9B0074EE71 /* AppDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = AppDelegate.h; path = ../../../../../Common_3/OS/Darwin/macOSAppDelegate.h; sourceTree = "<group>"; };
 		5C172F9021414AA70074EE71 /* The-Forge.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = "The-Forge.xcodeproj"; path = "../The-Forge/The-Forge.xcodeproj"; sourceTree = "<group>"; };
@@ -170,7 +168,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				650CCC5B2223C83C003533D9 /* MetalPerformanceShaders.framework in Frameworks */,
-				E970F791233C5EE7009FE7C4 /* libbz2.tbd in Frameworks */,
 				B21F76DC21420EC000DF2297 /* UIKit.framework in Frameworks */,
 				B21F76DD21420EC000DF2297 /* MetalKit.framework in Frameworks */,
 				B21F76DE21420EC000DF2297 /* Metal.framework in Frameworks */,
@@ -184,7 +181,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				650CCC592223C6BC003533D9 /* MetalPerformanceShaders.framework in Frameworks */,
-				E970F793233C5EF1009FE7C4 /* libbz2.tbd in Frameworks */,
 				B2087DEB21421A54006F372D /* MetalKit.framework in Frameworks */,
 				B2087DEC21421A54006F372D /* Metal.framework in Frameworks */,
 				5C172F9821414AB70074EE71 /* libThe-Forge.a in Frameworks */,
@@ -279,8 +275,8 @@
 		EA463C821EF81E8F005AC8C7 = {
 			isa = PBXGroup;
 			children = (
-				5B17815222A5C72B00991DCB /* profile.frag.metal */,
-				5B17815122A5C72B00991DCB /* profile.vert.metal */,
+
+
 				5CA80E1521F09F7500C99983 /* CommonShaders */,
 				5C172F9021414AA70074EE71 /* The-Forge.xcodeproj */,
 				28A5ADC4201F75D2000E571F /* Fonts */,
@@ -363,7 +359,7 @@
 		EA463C831EF81E8F005AC8C7 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 1020;
+				LastUpgradeCheck = 1130;
 				ORGANIZATIONNAME = "Confetti-FX";
 				TargetAttributes = {
 					28A5ADA6201F7587000E571F = {
@@ -689,6 +685,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_WARN_COMMA = NO;
+				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
 				CONFIGURATION_BUILD_DIR = "$(PROJECT_DIR)/../Bin/$(CONFIGURATION)/";
 				DEVELOPMENT_TEAM = BT67ZY58A8;
@@ -726,6 +723,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_WARN_COMMA = NO;
+				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
 				CONFIGURATION_BUILD_DIR = "$(PROJECT_DIR)/../Bin/$(CONFIGURATION)/";
 				DEVELOPMENT_TEAM = BT67ZY58A8;

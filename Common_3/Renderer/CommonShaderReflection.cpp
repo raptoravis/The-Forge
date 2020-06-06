@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -51,7 +51,7 @@ static bool ShaderResourceCmp(ShaderResource* a, ShaderResource* b)
 	if (isSame == false)
 		return isSame;
 
-	isSame = isSame && (strcmp(a->name, b->name) == 0);
+	isSame = (strcmp(a->name, b->name) == 0);
 #endif
 	return isSame;
 }
@@ -68,7 +68,7 @@ static bool ShaderVariableCmp(ShaderVariable* a, ShaderVariable* b)
 	if (isSame == false)
 		return isSame;
 
-	isSame = isSame && (strcmp(a->name, b->name) == 0);
+	isSame = (strcmp(a->name, b->name) == 0);
 
 	return isSame;
 }

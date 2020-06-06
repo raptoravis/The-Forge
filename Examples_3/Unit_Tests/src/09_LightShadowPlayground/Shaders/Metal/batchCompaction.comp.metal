@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  * 
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -28,44 +28,7 @@
 using namespace metal;
 
 #include "Shader_Defs.h"
-
-/*
-layout(std430, set = 0, binding = 0) restrict buffer indirectDrawArgsBufferAlphaBlock
-{
-	uint data[];
-} indirectDrawArgsBufferAlpha[NUM_CULLING_VIEWPORTS];
-
-layout(std430, set = 0, binding = NUM_CULLING_VIEWPORTS) restrict buffer indirectDrawArgsBufferNoAlphaBlock
-{
-	uint data[];
-} indirectDrawArgsBufferNoAlpha[NUM_CULLING_VIEWPORTS];
-
-layout(std430, set = 0, binding = NUM_CULLING_VIEWPORTS * 2) restrict readonly buffer uncompactedDrawArgsBlock
-{
-	UncompactedDrawArguments data[];
-} uncompactedDrawArgs[NUM_CULLING_VIEWPORTS];
-
-layout(std430, set = 0, binding = NUM_CULLING_VIEWPORTS * 2 + 1) restrict writeonly buffer indirectMaterialBuffer
-{
-	uint IndirectMaterialBufferData[];
-};
-
-layout(std430, set = 0, binding = NUM_CULLING_VIEWPORTS * 2 + 2) restrict readonly buffer materialProps
-{
-	uint materialPropsData[];
-};
-*/
-
-struct CSData {
-    constant uint* materialProps                                               [[id(0)]];
-};
-
-struct CSDataPerFrame {
-    device uint* indirectMaterialBuffer                                        [[id(0)]];
-    device atomic_uint* indirectDrawArgsBufferAlpha [NUM_CULLING_VIEWPORTS];
-    device atomic_uint* indirectDrawArgsBufferNoAlpha [NUM_CULLING_VIEWPORTS];
-    device UncompactedDrawArguments* uncompactedDrawArgs[NUM_CULLING_VIEWPORTS];
-};
+#include "cull_argument_buffers.h"
 
 //[numthreads(256, 1, 1)]
 kernel void stageMain(

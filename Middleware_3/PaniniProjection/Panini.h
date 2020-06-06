@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2019 Confetti Interactive Inc.
+* Copyright (c) 2018-2020 The Forge Interactive Inc.
 *
 * This file is part of The-Forge
 * (see https://github.com/ConfettiFX/The-Forge).
@@ -29,18 +29,15 @@
 #include "../../Common_3/OS/Interfaces/IMiddleware.h"
 #include "../../Common_3/OS/Interfaces/IFileSystem.h"
 
-extern ResourceDirectory RD_MIDDLEWARE_PANINI;
+extern ResourceDirEnum RD_MIDDLEWARE_PANINI;
 
 // forward decls
 struct Texture;
-struct GpuProfiler;
 struct Buffer;
 struct Shader;
 struct RootSignature;
 struct Pipeline;
 struct Sampler;
-struct DepthState;
-struct RasterizerState;
 struct DescriptorSet;
 
 /************************************************************************/
@@ -133,8 +130,6 @@ private:
 	RootSignature*    pRootSignature = NULL;
 	DescriptorSet*    pDescriptorSet = NULL;
 	Sampler*          pSamplerPointWrap = NULL;
-	DepthState*       pDepthStateDisable = NULL;
-	RasterizerState*  pRasterizerStateCullNone = NULL;
 	Pipeline*         pPipeline = NULL;
 
 	Buffer*           pVertexBufferTessellatedQuad = NULL;

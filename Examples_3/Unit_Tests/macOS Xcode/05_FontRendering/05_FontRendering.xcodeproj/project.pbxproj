@@ -10,8 +10,8 @@
 		28A5AD00201F6E8B000E571F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 28A5ACFF201F6E8B000E571F /* Assets.xcassets */; };
 		28A5AD03201F6E8B000E571F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 28A5AD01201F6E8B000E571F /* LaunchScreen.storyboard */; };
 		28A5AD0D201F6ECB000E571F /* 05_FontRendering.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C96E131B20077CDF004363F0 /* 05_FontRendering.cpp */; };
-		5B17814922A5C6F900991DCB /* profile.vert.metal in Copy Shaders */ = {isa = PBXBuildFile; fileRef = 5B17814722A5C6F900991DCB /* profile.vert.metal */; };
-		5B17814A22A5C6F900991DCB /* profile.frag.metal in Copy Shaders */ = {isa = PBXBuildFile; fileRef = 5B17814822A5C6F900991DCB /* profile.frag.metal */; };
+
+
 		5C172F722141498F0074EE71 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = 5C172F702141498E0074EE71 /* AppDelegate.m */; };
 		5C172F7B214149A90074EE71 /* libThe-Forge.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C172F782141499C0074EE71 /* libThe-Forge.a */; };
 		5C17302E21414E210074EE71 /* libThe-Forge_iOS.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5C17302D21414E210074EE71 /* libThe-Forge_iOS.a */; };
@@ -38,8 +38,6 @@
 		C96E131C20077CDF004363F0 /* 05_FontRendering.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C96E131B20077CDF004363F0 /* 05_FontRendering.cpp */; };
 		D28782F01F0A7F52004DC624 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D28782EF1F0A7F52004DC624 /* Assets.xcassets */; };
 		D2E631E11F3472DF005BFBA7 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = D2E631DF1F3472DF005BFBA7 /* MainMenu.xib */; };
-		E967DF94233C50550032E4BA /* libbz2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E967DF93233C50510032E4BA /* libbz2.tbd */; };
-		E967DF96233C505E0032E4BA /* libbz2.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E967DF95233C505A0032E4BA /* libbz2.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,8 +78,8 @@
 			dstPath = Shaders/Metal;
 			dstSubfolderSpec = 7;
 			files = (
-				5B17814922A5C6F900991DCB /* profile.vert.metal in Copy Shaders */,
-				5B17814A22A5C6F900991DCB /* profile.frag.metal in Copy Shaders */,
+
+
 				5CA80F7E21F0A1D300C99983 /* imgui.frag.metal in Copy Shaders */,
 				5CA80F7F21F0A1D300C99983 /* imgui.vert.metal in Copy Shaders */,
 				5CA80F8021F0A1D300C99983 /* textured_mesh.frag.metal in Copy Shaders */,
@@ -118,8 +116,8 @@
 		28A5AD39201F705C000E571F /* ComicRelief */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ComicRelief; path = ../../../UnitTestResources/Fonts/ComicRelief; sourceTree = "<group>"; };
 		28A5AD3A201F705C000E571F /* Crimson */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Crimson; path = ../../../UnitTestResources/Fonts/Crimson; sourceTree = "<group>"; };
 		28A5AD3B201F705C000E571F /* InconsolataLGC */ = {isa = PBXFileReference; lastKnownFileType = folder; name = InconsolataLGC; path = ../../../UnitTestResources/Fonts/InconsolataLGC; sourceTree = "<group>"; };
-		5B17814722A5C6F900991DCB /* profile.vert.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; name = profile.vert.metal; path = ../../src/05_FontRendering/Shaders/Metal/profile.vert.metal; sourceTree = "<group>"; };
-		5B17814822A5C6F900991DCB /* profile.frag.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; name = profile.frag.metal; path = ../../src/05_FontRendering/Shaders/Metal/profile.frag.metal; sourceTree = "<group>"; };
+
+
 		5C172F702141498E0074EE71 /* AppDelegate.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = AppDelegate.m; path = ../../../../../Common_3/OS/Darwin/macOSAppDelegate.m; sourceTree = "<group>"; };
 		5C172F712141498E0074EE71 /* AppDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = AppDelegate.h; path = ../../../../../Common_3/OS/Darwin/macOSAppDelegate.h; sourceTree = "<group>"; };
 		5C172F732141499C0074EE71 /* The-Forge.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = "The-Forge.xcodeproj"; path = "../The-Forge/The-Forge.xcodeproj"; sourceTree = "<group>"; };
@@ -155,7 +153,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				650CCC512223C511003533D9 /* MetalPerformanceShaders.framework in Frameworks */,
-				E967DF96233C505E0032E4BA /* libbz2.tbd in Frameworks */,
 				B21F76D221420EA200DF2297 /* Metal.framework in Frameworks */,
 				B21F76D121420EA200DF2297 /* MetalKit.framework in Frameworks */,
 				B21F76D021420EA200DF2297 /* UIKit.framework in Frameworks */,
@@ -169,7 +166,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				650CCC4F2223C505003533D9 /* MetalPerformanceShaders.framework in Frameworks */,
-				E967DF94233C50550032E4BA /* libbz2.tbd in Frameworks */,
 				B2087DE321421A40006F372D /* MetalKit.framework in Frameworks */,
 				B2087DE421421A40006F372D /* Metal.framework in Frameworks */,
 				5C172F7B214149A90074EE71 /* libThe-Forge.a in Frameworks */,
@@ -246,8 +242,8 @@
 		EA463C821EF81E8F005AC8C7 = {
 			isa = PBXGroup;
 			children = (
-				5B17814822A5C6F900991DCB /* profile.frag.metal */,
-				5B17814722A5C6F900991DCB /* profile.vert.metal */,
+
+
 				5CA80E1321F09F6300C99983 /* CommonShaders */,
 				5C172F732141499C0074EE71 /* The-Forge.xcodeproj */,
 				EA463C941EF81E8F005AC8C7 /* 05_FontRendering */,
@@ -326,7 +322,7 @@
 		EA463C831EF81E8F005AC8C7 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 1020;
+				LastUpgradeCheck = 1130;
 				ORGANIZATIONNAME = "Confetti-FX";
 				TargetAttributes = {
 					28A5ACED201F6E8B000E571F = {
@@ -645,6 +641,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_WARN_COMMA = NO;
+				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
 				CONFIGURATION_BUILD_DIR = "$(PROJECT_DIR)/../Bin/$(CONFIGURATION)/";
 				DEVELOPMENT_TEAM = "";
@@ -682,6 +679,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_WARN_COMMA = NO;
+				CODE_SIGN_IDENTITY = "-";
 				COMBINE_HIDPI_IMAGES = YES;
 				CONFIGURATION_BUILD_DIR = "$(PROJECT_DIR)/../Bin/$(CONFIGURATION)/";
 				DEVELOPMENT_TEAM = "";

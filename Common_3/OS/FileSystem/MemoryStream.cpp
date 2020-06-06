@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -58,6 +58,7 @@ size_t MemoryStream::Write(const void* sourceBuffer, size_t byteCount)
 	}
 	size_t bytesToWrite = AvailableCapacity(byteCount);
 	memcpy(pBuffer + mCursor, sourceBuffer, bytesToWrite);
+	mCursor += bytesToWrite;
 	return bytesToWrite;
 }
 
@@ -111,6 +112,8 @@ bool MemoryStream::Seek(SeekBaseOffset baseOffset, ssize_t seekOffset)
 ssize_t MemoryStream::GetSeekPosition() const { return mCursor; }
 
 ssize_t MemoryStream::GetFileSize() const { return mBufferSize; }
+
+void* MemoryStream::GetUnderlyingBuffer() const { return pBuffer; }
 
 void MemoryStream::Flush()
 {

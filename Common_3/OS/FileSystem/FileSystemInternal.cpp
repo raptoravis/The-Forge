@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -29,26 +29,32 @@
 
 #include "../Interfaces/ILog.h"
 #include "../Interfaces/IMemory.h"
+#include "../../ThirdParty/OpenSource/EASTL/sort.h"
 
 // MARK: - Initialization
 
 bool fsInitAPI(void)
 {
-	Path* resourceDirPath = fsCopyProgramDirectoryPath();
+	Path* resourceDirPath = fsGetApplicationDirectory();
 	if (!resourceDirPath)
 		return false;
 	
-	fsSetResourceDirectoryRootPath(resourceDirPath);
+	fsSetResourceDirRootPath(resourceDirPath);
 	fsFreePath(resourceDirPath);
+	
+	Path * preferredLogPath = fsGetPreferredLogDirectory();
+	fsSetLogFileDirectory(preferredLogPath);
+	fsFreePath(preferredLogPath);
 
 #ifdef USE_MEMORY_TRACKING
-	Path* logFilePath = fsCopyLogFileDirectoryPath();
+	Path* logFilePath = fsGetLogFileDirectory();
 	if (!logFilePath)
 		return false;
+
 	mmgrSetLogFileDirectory(fsGetPathAsNativeString(logFilePath));
 	fsFreePath(logFilePath);
 
-	Path* executablePath = fsCopyExecutablePath();
+	Path* executablePath = fsGetApplicationPath();
 	if (!executablePath)
 		return false;
 	
@@ -60,7 +66,7 @@ bool fsInitAPI(void)
 	return true;
 }
 
-void fsDeinitAPI(void)
+void fsExitAPI(void)
 {
 	fsResetResourceDirectories();
 }
@@ -117,6 +123,7 @@ FileMode fsFileModeFromString(const char* modeStr)
 
 const char* fsFileModeToString(FileMode mode)
 {
+	mode = (FileMode)(mode & ~FM_ALLOW_READ);
 	switch (mode)
 	{
 		case FM_READ: return "r";
@@ -182,6 +189,7 @@ void fsFreePath(Path* path)
 	
 	if (tfrg_atomicptr_add_relaxed(&path->mRefCount, -1) == 1)
 	{
+		fsFreeFileSystem(path->pFileSystem);
 		conf_free(path);
 	}
 }
@@ -204,7 +212,7 @@ Path* fsAppendPathComponent(const Path* basePath, const char* pathComponent)
 
 	if (!pathComponent) { return fsCopyPath(basePath); }
 
-	const size_t rootPathLength = basePath->pFileSystem->GetRootPathLength();
+	const size_t rootPathLength = basePath->pFileSystem->GetRootPathLength(basePath);
 	const char   directorySeparator = basePath->pFileSystem->GetPathDirectorySeparator();
 	const char   forwardSlash = '/';    // Forward slash is accepted on all platforms as a path component.
 
@@ -212,6 +220,7 @@ Path* fsAppendPathComponent(const Path* basePath, const char* pathComponent)
 	size_t maxPathLength = basePath->mPathLength + componentLength + 1;    // + 1 due to a possible added directory slash.
 	Path*  newPath = fsAllocatePath(maxPathLength);
 	newPath->pFileSystem = basePath->pFileSystem;
+	tfrg_atomicptr_add_relaxed(&newPath->pFileSystem->mRefCount, 1);
 
 	char* newPathBuffer = &newPath->mPathBufferOffset;
 	strncpy(newPathBuffer, &basePath->mPathBufferOffset, basePath->mPathLength);
@@ -313,6 +322,7 @@ Path* fsAppendPathExtension(const Path* basePath, const char* extension)
 	size_t maxPathLength = basePath->mPathLength + extensionLength + 1;    // + 1 due to a possible added directory slash.
 	Path*  newPath = fsAllocatePath(maxPathLength);
 	newPath->pFileSystem = basePath->pFileSystem;
+	tfrg_atomicptr_add_relaxed(&newPath->pFileSystem->mRefCount, 1);
 
 	char* newPathBuffer = &newPath->mPathBufferOffset;
 	strncpy(newPathBuffer, &basePath->mPathBufferOffset, basePath->mPathLength);
@@ -453,6 +463,7 @@ Path* fsReplacePathExtension(const Path* path, const char* newExtension)
 	if (!newExtension) { newExtension = ""; }
 
 	const char directorySeparator = path->pFileSystem->GetPathDirectorySeparator();
+	UNREF_PARAM(directorySeparator);
 
 	if (newExtension[0] == '.')
 	{
@@ -474,26 +485,36 @@ Path* fsReplacePathExtension(const Path* path, const char* newExtension)
 	{
 		newPathLength += 1;    // for '.'
 	}
+	if (!newExtensionLength)
+	{
+		newPathLength -= 1;
+	}
 
 	Path* newPath = fsAllocatePath(newPathLength);
 	newPath->pFileSystem = path->pFileSystem;
+	tfrg_atomicptr_add_relaxed(&newPath->pFileSystem->mRefCount, 1);
 	newPath->mPathLength = newPathLength;
 
 	size_t basePathLength = path->mPathLength - currentExtension.length;
+	if (!newExtensionLength)
+	{
+		basePathLength -= 1;
+	}
 	strncpy(&newPath->mPathBufferOffset, &path->mPathBufferOffset, basePathLength);
 
-	if (currentExtension.buffer == NULL)
+	if (currentExtension.buffer == NULL && newExtensionLength)
 	{
 		(&newPath->mPathBufferOffset)[basePathLength] = '.';
 		basePathLength += 1;
 	}
-
-	strncpy((&newPath->mPathBufferOffset) + basePathLength, newExtension, newExtensionLength);
-
+	if (newExtensionLength)
+	{
+		strncpy((&newPath->mPathBufferOffset) + basePathLength, newExtension, newExtensionLength);
+	}
 	return newPath;
 }
 
-Path* fsCopyParentPath(const Path* path)
+Path* fsGetParentPath(const Path* path)
 {
 	if (!path) { return NULL; }
 
@@ -501,7 +522,7 @@ Path* fsCopyParentPath(const Path* path)
 	PathComponent directoryComponent = fsGetPathDirectoryName(path);
 	if (directoryComponent.buffer == NULL)
 	{
-		return NULL;
+		return fsCreatePath(path->pFileSystem, "");
 	}
 
 	const char* directoryComponentEnd = directoryComponent.buffer + directoryComponent.length;
@@ -511,6 +532,7 @@ Path* fsCopyParentPath(const Path* path)
 
 	Path* newPath = fsAllocatePath(newPathLength);
 	newPath->pFileSystem = path->pFileSystem;
+	tfrg_atomicptr_add_relaxed(&newPath->pFileSystem->mRefCount, 1);
 	newPath->mPathLength = newPathLength;
 	strncpy(&newPath->mPathBufferOffset, pathStart, newPathLength);
 
@@ -569,6 +591,16 @@ size_t fsGetLowercasedPathExtension(const Path* path, char* buffer, size_t maxLe
 	return extension.length;
 }
 
+eastl::string fsGetPathFileNameAndExtension(const Path* path)
+{
+	if (!path) { return { NULL, 0 }; }
+
+	PathComponent component;
+	PathComponent ext;
+	fsGetPathComponents(path, NULL, &component, &ext);
+	return fsPathComponentToString(component) + "." + fsPathComponentToString(ext);
+}
+
 const char* fsGetPathAsNativeString(const Path* path)
 {
 	if (!path || path->mPathLength == 0)
@@ -577,6 +609,12 @@ const char* fsGetPathAsNativeString(const Path* path)
 	}
 	return &path->mPathBufferOffset;
 }
+
+bool fsPathContainsString(const Path* path, const char * str)
+{
+	return eastl::string(fsGetPathAsNativeString(path)).find(str) != eastl::string::npos;
+}
+
 
 #ifdef _WIN32
 #define strncasecmp _strnicmp
@@ -602,7 +640,10 @@ bool fsPathsEqual(const Path* pathA, const Path* pathB)
 
 // MARK: - FileSystem
 
-FileSystem::FileSystem(FileSystemKind kind): mKind(kind) { };
+FileSystem::FileSystem(FileSystemKind kind): mKind(kind)
+{
+	tfrg_atomicptr_store_relaxed(&mRefCount, 1);
+}
 
 FileSystemKind fsGetFileSystemKind(const FileSystem* fileSystem) { return fileSystem->mKind; }
 
@@ -612,8 +653,8 @@ FileSystem* fsCreateFileSystemFromFileAtPath(const Path* rootPath, FileSystemFla
 {
 	if (!rootPath) { return NULL; }
 
-	PathComponent extension = fsGetPathExtension(rootPath);
 #ifndef FORGE_DISABLE_ZIP
+	PathComponent extension = fsGetPathExtension(rootPath);
 	if (extension.length == 3 && stricmp("zip", extension.buffer) == 0)
 	{
 		return ZipFileSystem::CreateWithRootAtPath(rootPath, flags);
@@ -622,7 +663,7 @@ FileSystem* fsCreateFileSystemFromFileAtPath(const Path* rootPath, FileSystemFla
 	return NULL;
 }
 
-Path* fsCopyPathInParentFileSystem(const FileSystem* fileSystem)
+Path* fsGetPathInParentFileSystem(const FileSystem* fileSystem)
 {
 	if (!fileSystem) { return NULL; }
 	
@@ -637,8 +678,11 @@ void fsFreeFileSystem(FileSystem* fileSystem)
 	{
 		return;    // The system FileSystem is a singleton that can never be deleted.
 	}
-
-	conf_delete(fileSystem);
+	
+	if (tfrg_atomicptr_add_relaxed(&fileSystem->mRefCount, -1) == 1)
+	{
+		conf_delete(fileSystem);
+	}
 }
 
 FileStream* fsOpenFile(const Path* filePath, FileMode mode) 
@@ -667,7 +711,7 @@ bool fsFileSystemIsReadOnly(const FileSystem* fileSystem)
 #define SHADER_DIR "Shaders"
 #endif
 
-const char* gResourceDirectoryDefaults[RD_COUNT] = {
+const char* gResourceDirEnumDefaults[RD_COUNT] = {
 	SHADER_DIR "/Binary/",    // RD_BinShaders
 	SHADER_DIR "/",           // RD_SHADER_SOURCES
 	"Textures/",              // RD_TEXTURES
@@ -678,45 +722,61 @@ const char* gResourceDirectoryDefaults[RD_COUNT] = {
 	"Audio/",                 // RD_AUDIO
 };
 
-Path* gResourceDirectoryOverrides[RD_COUNT];
+Path* gResourceDirEnumOverrides[RD_COUNT];
+Path* gLogFileDir;
 
-Path* fsCopyResourceDirectoryRootPath() { 
-	return fsCopyPath(gResourceDirectoryOverrides[RD_ROOT]); 
+Path* fsGetResourceDirRootPath() { 
+	return fsCopyPath(gResourceDirEnumOverrides[RD_ROOT]); 
 }
 
-void fsSetResourceDirectoryRootPath(const Path* path) { 
-	fsSetPathForResourceDirectory(RD_ROOT, path);
+void fsSetResourceDirRootPath(const Path* path) { 
+	fsSetPathForResourceDirEnum(RD_ROOT, path);
 }
 
-Path* fsCopyPathForResourceDirectory(ResourceDirectory resourceDir)
+Path* fsGetResourceDirEnumPath(ResourceDirEnum resourceDir)
 {
-	if (gResourceDirectoryOverrides[resourceDir])
+	if (gResourceDirEnumOverrides[resourceDir])
 	{
-		return fsCopyPath(gResourceDirectoryOverrides[resourceDir]);
+		return fsCopyPath(gResourceDirEnumOverrides[resourceDir]);
 	}
 
-	Path* rootPath = gResourceDirectoryOverrides[RD_ROOT];
+	Path* rootPath = gResourceDirEnumOverrides[RD_ROOT];
 	ASSERT(rootPath);
-	return fsAppendPathComponent(rootPath, gResourceDirectoryDefaults[resourceDir]);
+	return fsAppendPathComponent(rootPath, gResourceDirEnumDefaults[resourceDir]);
 }
 
-void fsSetRelativePathForResourceDirectory(ResourceDirectory resourceDir, const char* relativePath)
+void fsSetRelativePathForResourceDirEnum(ResourceDirEnum resourceDir, const char* relativePath)
 {
-	Path* rootPath = fsCopyResourceDirectoryRootPath();
+	Path* rootPath = fsGetResourceDirRootPath();
 	Path* fullPath = fsAppendPathComponent(rootPath, relativePath);
 
-	fsSetPathForResourceDirectory(resourceDir, fullPath);
+	fsSetPathForResourceDirEnum(resourceDir, fullPath);
 
 	fsFreePath(rootPath);
 	fsFreePath(fullPath);
 }
 
-void fsSetPathForResourceDirectory(ResourceDirectory resourceDir, const Path* path)
+void fsSetLogFileDirectory(const Path * path)
+{
+	ASSERT(path != NULL);
+	fsFreePath(gLogFileDir);
+	gLogFileDir = fsCopyPath(path);
+}
+
+Path* fsGetLogFileDirectory()
+{
+	if (!gLogFileDir) {
+		gLogFileDir = fsGetPreferredLogDirectory();
+	}
+	return fsCopyPath(gLogFileDir);
+}
+
+void fsSetPathForResourceDirEnum(ResourceDirEnum resourceDir, const Path* path)
 {
 	ASSERT(resourceDir != RD_ROOT || path != NULL);
 
-	fsFreePath(gResourceDirectoryOverrides[resourceDir]);    // fsFreePath checks for NULL
-	gResourceDirectoryOverrides[resourceDir] = fsCopyPath(path);
+	fsFreePath(gResourceDirEnumOverrides[resourceDir]);    // fsFreePath checks for NULL
+	gResourceDirEnumOverrides[resourceDir] = fsCopyPath(path);
 }
 
 // NOTE: not thread-safe. It is the application's responsibility to ensure that no modifications to the file system
@@ -725,16 +785,19 @@ void fsResetResourceDirectories()
 { 
 	for (size_t i = 0; i < RD_COUNT; i += 1)
 	{
-		fsFreePath(gResourceDirectoryOverrides[i]);    // fsFreePath checks for NULL
+		fsFreePath(gResourceDirEnumOverrides[i]);    // fsFreePath checks for NULL
 	}
-	memset(gResourceDirectoryOverrides, 0, RD_COUNT * sizeof(Path*));
+	memset(gResourceDirEnumOverrides, 0, RD_COUNT * sizeof(Path*));
+
+	fsFreePath(gLogFileDir);
+	gLogFileDir = nullptr;
 }
 
-const char* fsGetDefaultRelativePathForResourceDirectory(ResourceDirectory resourceDir) { return gResourceDirectoryDefaults[resourceDir]; }
+const char* fsGetDefaultRelativePathForResourceDirEnum(ResourceDirEnum resourceDir) { return gResourceDirEnumDefaults[resourceDir]; }
 
 size_t fsGetExecutableName(char* buffer, size_t maxLength)
 {
-	Path*         executablePath = fsCopyExecutablePath();
+	Path*         executablePath = fsGetApplicationPath();
 	PathComponent fileName = fsGetPathFileName(executablePath);
 
 	strncpy(buffer, fileName.buffer, min(fileName.length, maxLength));
@@ -892,11 +955,19 @@ eastl::vector<PathHandle> fsGetSubDirectories(const Path* directory)
 	return files;
 }
 
+void fsSortPathHandlesByName(eastl::vector<PathHandle>& pathHandles)
+{
+	eastl::sort(pathHandles.begin(), pathHandles.end(), [](PathHandle const & a, PathHandle const & b)
+	{
+		return strcmp(fsGetPathAsNativeString(a), fsGetPathAsNativeString(b)) < 0;
+	});
+}
+
 // MARK: - Resource Directory Utilities
 
 bool fsPlatformUsesBundledResources()
 {
-#if defined(__ANDROID__) || defined(_DURANGO) || defined(TARGET_IOS) || defined(FORGE_IGNORE_PSZBASE)
+#if defined(__ANDROID__) || defined(_DURANGO) || defined(TARGET_IOS) || defined(NX64) || defined(FORGE_IGNORE_PSZBASE) || defined(ORBIS)
 	return true;
 #else
 	return false;
@@ -904,9 +975,9 @@ bool fsPlatformUsesBundledResources()
 }
 
 FileStream*
-	fsOpenFileInResourceDirectory(ResourceDirectory resourceDir, const char* relativePath, FileMode mode)
+	fsOpenFileInResourceDirEnum(ResourceDirEnum resourceDir, const char* relativePath, FileMode mode)
 {
-	Path* path = fsCopyPathInResourceDirectory(resourceDir, relativePath);
+	Path* path = fsGetPathInResourceDirEnum(resourceDir, relativePath);
 	if (!path) { return NULL; }
 
 	FileStream* fh = fsOpenFile(path, mode);
@@ -914,18 +985,18 @@ FileStream*
 	return fh;
 }
 
-Path* fsCopyPathInResourceDirectory(ResourceDirectory resourceDir, const char* relativePath)
+Path* fsGetPathInResourceDirEnum(ResourceDirEnum resourceDir, const char* relativePath)
 {
-	Path* resourceDirPath = fsCopyPathForResourceDirectory(resourceDir);
+	Path* resourceDirPath = fsGetResourceDirEnumPath(resourceDir);
 	Path* result = fsAppendPathComponent(resourceDirPath, relativePath);
 	fsFreePath(resourceDirPath);
 
 	return result;
 }
 
-bool fsFileExistsInResourceDirectory(ResourceDirectory resourceDir, const char* relativePath)
+bool fsFileExistsInResourceDirEnum(ResourceDirEnum resourceDir, const char* relativePath)
 {
-	Path* path = fsCopyPathInResourceDirectory(resourceDir, relativePath);
+	Path* path = fsGetPathInResourceDirEnum(resourceDir, relativePath);
 	bool  fileExists = fsFileExists(path);
 	fsFreePath(path);
 
@@ -934,9 +1005,16 @@ bool fsFileExistsInResourceDirectory(ResourceDirectory resourceDir, const char* 
 
 // MARK: - FileStream Functions
 
+void* fsGetStreamBufferIfPresent(FileStream* stream)
+{
+	if (!stream) { return NULL; }
+	return stream->GetUnderlyingBuffer();
+}
+
 size_t fsReadFromStream(FileStream* stream, void* outputBuffer, size_t bufferSizeInBytes)
 {
 	if (!stream) { return 0; }
+	if (!outputBuffer) { return 0; }
 	return stream->Read(outputBuffer, bufferSizeInBytes);
 }
 
@@ -1193,22 +1271,8 @@ bool fsWriteToStreamFloat4(FileStream* stream, float4 value) { return fsWriteToS
 
 bool fsWriteToStreamString(FileStream* stream, const char* value)
 {
-	size_t i = 0;
-
-	while (true)
-	{
-		if (!fsWriteToStreamType(stream, value[i]))
-		{
-			return false;
-		}
-		if (value[i] == 0)
-		{
-			break;
-		}
-		i += 1;
-	}
-
-	return true;
+	size_t len = strlen(value);
+	return fsWriteToStream(stream, value, len) == len;
 }
 
 bool fsWriteToStreamLine(FileStream* stream, const char* value)

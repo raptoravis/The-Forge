@@ -12,16 +12,17 @@ const char* gApplicationName = NULL;
 void PrintHelp()
 {
 	printf("AssetPipelineCmd\n");
-	printf("\nCommand: processanimations \"animation/directory/\" \"output/directory/\" [flags]\n");
-	printf("\t--quiet: Print only error messages.\n");
-	printf("\t--force: Force all assets to be processed. Including ones that are already up-to-date.\n");
-	printf("\nCommand: processmeshes \"meshes/directory/\" \"output/directory/\" [arguments]\n");
-	printf("\t-posbits N: use N-bit quantization for positions (default: 16; N should be between 1 and 16)\n");
-	printf("\t-texbits N: use N-bit quantization for texture coordinates (default: 12; N should be between 1 and 16)\n");
-	printf("\t-normbits N: use N-bit quantization for normals and tangents (default: 8; N should be between 1 and 8)\n");
-	printf("\nCommand: processtextures \"textures/directory/\" \"output/directory/\" \n");
-	printf("\nOther:\n");
-	printf("\t-h or -help: Print usage information.\n");
+	printf(
+		"\nCommand: ProcessAnimations          (GLTF to OZZ) -pa   \"animation/directory/\" \"output/directory/\" [flags]\n"
+		"\nCommand: ProcessVirtualTextures     (DDS to SVT)  -pvt  \"source texture directory/\" \"output directory/\" [flags]\n"
+		"\nCommand: ProcessTFX                 (TFX to GLTF) -ptfx \"source tfx directory/\" \"output directory/\" [flags]\n"
+			"\t --fhc | -followhaircount      : Number of follow hairs around loaded guide hairs procedually\n"
+			"\t --tsf | -tipseparationfactor  : Separation factor for the follow hairs\n"
+			"\t --maxradius | -maxradius      : Max radius of the random distribution to generate follow hairs\n"
+		"\nCommon Options:\n"
+			"\t --quiet                       : Print only error messages.\n"
+			"\t --force                       : Force all assets to be processed. Including ones that are already up-to-date.\n"
+			"\t -h | -help                    : Print usage information.\n");
 }
 
 int AssetPipelineCmd(int argc, char** argv)
@@ -30,7 +31,7 @@ int AssetPipelineCmd(int argc, char** argv)
 	if (argc > 0)
 	{
 		gApplicationName = argv[0];
-        PathHandle applicationPath = fsCopyExecutablePath();
+        PathHandle applicationPath = fsGetApplicationPath();
 		appLastModified = fsGetLastModifiedTime(applicationPath);
 	}
 
@@ -40,11 +41,7 @@ int AssetPipelineCmd(int argc, char** argv)
 		return 0;
 	}
 
-	eastl::string arg = argv[1];
-	eastl::string command = arg;
-	arg.make_lower();
-
-	if (arg == "-h" || arg == "-help")
+	if (stricmp(argv[1], "-h") == 0 || stricmp(argv[1], "-help") == 0)
 	{
 		PrintHelp();
 		return 0;
@@ -57,7 +54,7 @@ int AssetPipelineCmd(int argc, char** argv)
 	}
 
     FileSystem* fileSystem = fsGetSystemFileSystem();
-    PathHandle workingDir = fsCopyWorkingDirectoryPath();
+    PathHandle workingDir = fsGetApplicationDirectory();
     
 	PathHandle inputDir = fsCreatePath(fileSystem, argv[2]);
     if (!inputDir)
@@ -71,90 +68,65 @@ int AssetPipelineCmd(int argc, char** argv)
 	settings.quiet = false;
 	settings.force = false;
 	settings.minLastModifiedTime = (unsigned int)appLastModified;
-	settings.quantizePositionBits = 16;
-	settings.quantizeTexBits = 16;
-	settings.quantizeNormalBits = 8;
+
+	const char* command = argv[1];
 
 	for (int i = 4; i < argc; ++i)
 	{
-		arg = argv[i];
-		arg.make_lower();
+		const char* arg = argv[i];
 
-		if (arg == "--quiet")
+		if (stricmp(arg, "--quiet") == 0)
 		{
 			settings.quiet = true;
 		}
-		else if (arg == "--force")
+		else if (stricmp(arg, "--force") == 0)
 		{
 			settings.force = true;
 		}
-		if (arg == "-posbits")
+		else if (stricmp(arg, "-followhaircount") == 0 || stricmp(arg, "--fhc") == 0)
 		{
 			if (i + 1 < argc && isdigit(argv[i + 1][0]))
-				settings.quantizePositionBits = atoi(argv[++i]);
+				settings.mFollowHairCount = atoi(argv[++i]);
 			else
-				printf("WARNING: Argument expects a value: %s\n", arg.c_str());
-
-			if (settings.quantizePositionBits < 1 || settings.quantizePositionBits > 16)
-			{
-				printf("WARNING: Argument outide of range 1-16: %s\n", arg.c_str());
-				printf("         Using default value\n");
-				settings.quantizePositionBits = 16;
-			}
+				printf("WARNING: Argument expects a value: %s\n", arg);
 		}
-		else if (arg == "-texbits")
+		else if (stricmp(arg, "-tipseparationfactor") == 0 || stricmp(arg, "--tsf") == 0)
 		{
-			if (i + 1 < argc && isdigit(argv[i + 1][0]))
-				settings.quantizeTexBits = atoi(argv[++i]);
-			else
-				printf("WARNING: Argument expects a value: %s\n", arg.c_str());
-
-			if (settings.quantizeTexBits < 1 || settings.quantizeTexBits > 16)
-			{
-				printf("WARNING: Argument outide of range 1-16: %s\n", arg.c_str());
-				printf("         Using default value\n");
-				settings.quantizeTexBits = 16;
-			}
+			settings.mTipSeperationFactor = (float)atof(argv[++i]);
 		}
-		else if (arg == "-normbits")
+		else if (stricmp(arg, "-maxradius") == 0 || stricmp(arg, "--maxradius") == 0)
 		{
-			if (i + 1 < argc && isdigit(argv[i + 1][0]))
-				settings.quantizeNormalBits = atoi(argv[++i]);
-			else
-				printf("WARNING: Argument expects a value: %s\n", arg.c_str());
-
-
-			if (settings.quantizeNormalBits < 1 || settings.quantizeNormalBits > 8)
-			{
-				printf("WARNING: Argument outide of range 1-8: %s\n", arg.c_str());
-				printf("         Using default value\n");
-				settings.quantizeNormalBits = 8;
-			}
+			settings.mMaxRadiusAroundGuideHair = (float)atof(argv[++i]);
 		}
 		else
 		{
-			printf("WARNING: Unrecognized argument: %s\n", arg.c_str());
+			printf("WARNING: Unrecognized argument: %s\n", arg);
 		}
 	}
 
-	if (command == "processanimations")
+	if (stricmp(command, "-pa") == 0)
 	{
 		if (!AssetPipeline::ProcessAnimations(inputDir, outputDir, &settings))
 			return 1;
 	}
-	else if (command == "processmeshes")
-	{
-		if (!AssetPipeline::ProcessModels(inputDir, outputDir, &settings))
-			return 1;
-	}
-	else if (command == "processtextures")
+	else if (stricmp(command, "-pt") == 0)
 	{
 		if (!AssetPipeline::ProcessTextures(inputDir, outputDir, &settings))
 			return 1;
 	}
+	else if (stricmp(command, "-pvt") == 0)
+	{
+		if (!AssetPipeline::ProcessVirtualTextures(inputDir, outputDir, &settings))
+			return 1;
+	}
+	else if (stricmp(command, "-ptfx") == 0)
+	{
+		if (!AssetPipeline::ProcessTFX(inputDir, outputDir, &settings))
+			return 1;
+	}
 	else
 	{
-		printf("ERROR: Invalid command.\n");
+		printf("ERROR: Invalid command. %s\n", command);
 	}
 
 	return 0;
@@ -176,7 +148,7 @@ int main(int argc, char** argv)
 	int ret = AssetPipelineCmd(argc, argv);
 
 	Log::Exit();
-	fsDeinitAPI();
+	fsExitAPI();
 	MemAllocExit();
 
 	return ret;

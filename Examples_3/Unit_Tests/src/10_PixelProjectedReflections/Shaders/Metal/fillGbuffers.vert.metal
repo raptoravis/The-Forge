@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  * 
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -54,11 +54,13 @@ struct PsIn
 	float2 uv;
 };
 
-struct FSDataPerFrame {
+struct FSDataPerFrame
+{
     constant CameraData& cbCamera                   [[id(0)]];
 };
 
-struct FSDataPerDraw {
+struct FSDataPerDraw
+{
     constant ObjectData& cbObject                   [[id(0)]];
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2019 Confetti Interactive Inc.
+ * Copyright (c) 2018-2020 The Forge Interactive Inc.
  *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -28,7 +28,6 @@ static const uint32_t MAX_SHADER_STAGE_COUNT = 5;
 
 typedef enum TextureDimension
 {
-	TEXTURE_DIM_UNDEFINED = 0,
 	TEXTURE_DIM_1D,
 	TEXTURE_DIM_2D,
 	TEXTURE_DIM_2DMS,
@@ -38,7 +37,8 @@ typedef enum TextureDimension
 	TEXTURE_DIM_2D_ARRAY,
 	TEXTURE_DIM_2DMS_ARRAY,
 	TEXTURE_DIM_CUBE_ARRAY,
-	TEXTURE_DIM_COUNT
+	TEXTURE_DIM_COUNT,
+	TEXTURE_DIM_UNDEFINED,
 } TextureDimension;
 
 struct VertexInput
@@ -99,9 +99,6 @@ struct ShaderResource
 //    uint32_t            mtlArgumentBufferType;    // Needed to bind multiple resources under a same descriptor on Metal.
     bool                mIsArgumentBufferField;
     ArgumentDescriptor  mtlArgumentDescriptors;
-#endif
-#if defined(DIRECT3D11)
-	uint32_t constant_size;
 #endif
 };
 
