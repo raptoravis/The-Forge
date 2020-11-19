@@ -64,8 +64,8 @@ const uint32_t gImageCount = 3;
 Renderer*      pRenderer = NULL;
 
 Queue*   pGraphicsQueue = NULL;
-CmdPool* pCmdPool = NULL;
-Cmd**    ppCmds = NULL;
+CmdPool* pCmdPools[gImageCount];
+Cmd*     pCmds[gImageCount];
 
 SwapChain*    pSwapChain = NULL;
 Fence*        pRenderCompleteFences[gImageCount] = { NULL };
@@ -184,20 +184,12 @@ public:
 	bool Init()
 	{
         // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/31_Audio");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../UnitTestResources/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,          "../../UnitTestResources/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,    "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,      "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_AUDIO,           "../../UnitTestResources/Audio");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,  "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,    "../../../../Middleware_3/UI");
-        }
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES,	"Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES,	"CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG,		"GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES,			"Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS,			"Fonts");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_AUDIO,			"Audio");
         
 		// WINDOW AND RENDERER SETUP
 		//
@@ -212,12 +204,15 @@ public:
 		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pGraphicsQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -237,14 +232,13 @@ public:
 			return false;
 		}
 
-		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 
 		// Add the GUI Panels/Windows
 		const TextDrawDesc UIPanelWindowTitleTextDesc = { 0, 0xffff00ff, 16 };
-
-		float   dpiScale = getDpiScale().x;
-		vec2    UIPosition = { mSettings.mWidth * 0.01f, mSettings.mHeight * 0.05f };
-		vec2    UIPanelSize = vec2(650.f, 1000.f) / dpiScale;
+				
+		vec2    UIPosition = { mSettings.mWidth * 0.01f, mSettings.mHeight * 0.15f };
+		vec2    UIPanelSize = vec2(650.f, 1000.f);
 		GuiDesc guiDesc(UIPosition, UIPanelSize, UIPanelWindowTitleTextDesc);
 		pStandaloneControlsGUIWindow = gAppUI.AddGuiComponent("AUDIO", &guiDesc);
 
@@ -292,7 +286,7 @@ public:
 		}
 
 		// Init the audio data
-		pGlobal = conf_new(GlobalAudio);
+		pGlobal = tf_new(GlobalAudio);
 		pGlobal->mSoLoud.init();
 				
 		SoLoud::result res = pGlobal->mBgWavObj.load(gWavBgTestFile);
@@ -338,14 +332,17 @@ public:
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
 
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
 
 		exitResourceLoaderInterface(pRenderer);
 		removeQueue(pRenderer, pGraphicsQueue);
 		removeRenderer(pRenderer);
 
-		conf_delete(pGlobal);
+		tf_delete(pGlobal);
 	}
 
 	bool Load()
@@ -390,7 +387,8 @@ public:
 		clearVal.b = 0.0f;
 		clearVal.a = 1.0f;
 
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &gFrameIndex);
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
 
 		// FRAME SYNC & ACQUIRE SWAPCHAIN RENDER TARGET
 		//
@@ -401,16 +399,18 @@ public:
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pNextFence);
 
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
+
 		// Acquire the main render target from the swapchain
-		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[gFrameIndex];
+		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		Semaphore*    pRenderCompleteSemaphore = pRenderCompleteSemaphores[gFrameIndex];
 		Fence*        pRenderCompleteFence = pRenderCompleteFences[gFrameIndex];
-		Cmd*          cmd = ppCmds[gFrameIndex];
+		Cmd*          cmd = pCmds[gFrameIndex];
 		beginCmd(cmd);    // start recording commands
 
 		RenderTargetBarrier barriers[] =    // wait for resource transition
 		{
-			{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
+			{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
 		};
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 
@@ -430,7 +430,7 @@ public:
 		gAppUI.Gui(pStandaloneControlsGUIWindow);    // adds the gui element to AppUI::ComponentsToUpdate list
 		TextDrawDesc textDrawDesc(0, 0xff00dddd, 18);
 		gAppUI.DrawText(
-			cmd, float2(8, 15), eastl::string().sprintf("CPU %f ms", gTimer.GetUSecAverage() * 1000.0f).c_str(), &textDrawDesc);
+			cmd, float2(8, 15), eastl::string().sprintf("CPU %f ms", gTimer.GetUSecAverage() / 1000.0f).c_str(), &textDrawDesc);
 		gAppUI.Draw(cmd);
 
 		cmdBindRenderTargets(cmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
@@ -438,7 +438,7 @@ public:
 
 		// PRESENT THE GRPAHICS QUEUE
 		//
-		barriers[0] = { pRenderTarget, RESOURCE_STATE_PRESENT };
+		barriers[0] = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 		endCmd(cmd);
 		QueueSubmitDesc submitDesc = {};
@@ -451,12 +451,14 @@ public:
 		submitDesc.pSignalFence = pRenderCompleteFence;
 		queueSubmit(pGraphicsQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = gFrameIndex;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
 		presentDesc.pSwapChain = pSwapChain;
 		presentDesc.mSubmitDone = true;
 		queuePresent(pGraphicsQueue, &presentDesc);
+
+		gFrameIndex = (gFrameIndex + 1) % gImageCount;
 	}
 
 	const char* GetName() { return "31_Audio"; }
@@ -471,7 +473,7 @@ public:
 		swapChainDesc.mHeight = mSettings.mHeight;
 		swapChainDesc.mImageCount = gImageCount;
 		swapChainDesc.mColorFormat = getRecommendedSwapchainFormat(true);
-		swapChainDesc.mEnableVsync = false;
+		swapChainDesc.mEnableVsync = mSettings.mDefaultVSyncEnabled;
 		::addSwapChain(pRenderer, &swapChainDesc, &pSwapChain);
 
 		return pSwapChain != NULL;

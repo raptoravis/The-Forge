@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018 Confetti Interactive Inc.
+* Copyright (c) 2018 The Forge Interactive Inc.
 *
 * This file is part of The-Forge
 * (see https://github.com/ConfettiFX/The-Forge).
@@ -264,21 +264,16 @@ struct ASMCpuSettings
 
 typedef struct BufferIndirectCommand
 {
-	// Metal does not use index buffer since there is no builtin primitive id
-#if defined(METAL)
-	IndirectDrawIndexArguments arg;
-#elif defined(ORBIS)
-	IndirectDrawIndexArguments arg;
-#else
+#if defined(DIRECT3D12)
 	// Draw ID is sent as indirect argument through root constant in DX12
-#if defined(DIRECT3D12)
 	uint32_t                   drawId;
-#endif
 	IndirectDrawIndexArguments arg;
-#if defined(DIRECT3D12)
-	uint32_t                   _pad0, _pad1;
+	uint32_t                   pad[2];
 #else
-	uint32_t _pad0, _pad1, _pad2;
+	IndirectDrawIndexArguments arg;
+#if !defined(ORBIS)
+	// Padding not supported on Orbis
+	uint32_t                   pad[3];
 #endif
 #endif
 } BufferIndirectCommand;
@@ -293,6 +288,8 @@ static float asmCurrentTime = 0.0f;
 constexpr uint32_t gImageCount = 3;
 const char* gSceneName = "SanMiguel.gltf";
 
+
+static bool shouldExitSDFGeneration = false;
 
 /************************************************************************/
 // Render targets
@@ -408,7 +405,7 @@ DescriptorSet* pDescriptorSetASMCopyDepthQuadPass[2] = { NULL };
 /************************************************************************/
 Shader* pShaderASMFillIndirection = NULL;
 Pipeline* pPipelineASMFillIndirection = NULL;
-#if defined(ORBIS)
+#if defined(ORBIS) || defined(PROSPERO)
 Shader* pShaderASMFillIndirectionFP16 = NULL;
 #endif
 RootSignature* pRootSignatureASMFillIndirection = NULL;
@@ -557,7 +554,7 @@ Buffer* pBufferSDFVolumeData[gImageCount] = { NULL };
 /************************************************************************/
 
 RenderTarget* pRenderTargetSDFMeshVisualization = NULL;
-Texture* pRenderTargetSDFMeshShadow = NULL;
+Texture* pTextureSDFMeshShadow = NULL;
 
 RenderTarget* pRenderTargetUpSampleSDFShadow = NULL;
 
@@ -583,8 +580,8 @@ eastl::vector<Texture*> gSpecularMapsPacked;
 /************************************************************************/
 struct
 {
-	uint32 mFilterWidth = 2U;
-	float mEsmControl = 100.f;
+	uint32_t mFilterWidth = 2U;
+	float    mEsmControl = 100.f;
 } gEsmCpuSettings;
 
 struct
@@ -665,8 +662,8 @@ ProfileToken gGpuProfileToken;
 Renderer* pRenderer = NULL;
 
 Queue*   pGraphicsQueue = NULL;
-CmdPool* pCmdPool = NULL;
-Cmd**    ppCmds = NULL;
+CmdPool* pCmdPools[gImageCount];
+Cmd*     pCmds[gImageCount];
 
 SwapChain* pSwapChain = NULL;
 Fence*     pRenderCompleteFences[gImageCount] = { NULL };
@@ -709,7 +706,7 @@ static void setRenderTarget(
 }
 
 
-#if defined(_DURANGO)
+#if defined(XBOX)
 #include "../../../../Xbox/Common_3/Renderer/Direct3D12/Direct3D12X.h"
 #endif
 
@@ -721,7 +718,8 @@ struct Ray
 	Ray(const vec3& startPos,
 		const vec3& dir)
 		:startPos(startPos),
-		dir(dir)
+		dir(dir),
+		invDir(vec3(1.f / dir.getX(), 1.f / dir.getY(), 1.f / dir.getZ()))
 	{
 	}
 
@@ -730,13 +728,9 @@ struct Ray
 		return startPos + (dir * t);
 	}
 
-	vec3 GetInvDir() const
-	{
-		return vec3(1.f / dir.getX(), 1.f / dir.getY(), 1.f / dir.getZ());
-	}
-
 	vec3 startPos;
 	vec3 dir;
+	vec3 invDir;
 };
 
 
@@ -984,7 +978,7 @@ void BVHTreeIntersectRayAux(BVHNode* rootNode, BVHNode* node,
 
 	if (node->BoundingBox.InstanceID < 0.f)
 	{
-		bool intersects = RayIntersectsBox(ray.startPos, ray.GetInvDir(),
+		bool intersects = RayIntersectsBox(ray.startPos, ray.invDir,
 			node->BoundingBox.mAABB.minBounds, node->BoundingBox.mAABB.maxBounds);
 
 		if (intersects)
@@ -1246,7 +1240,7 @@ BVHNode* CreateBVHNodeSHA(BVHTree* bvhTree, int32_t begin, int32_t end, float pa
 
 	CalculateBounds(bvhTree, begin, end, minBounds, maxBounds);
 
-	BVHNode* node = (BVHNode*)conf_placement_new<BVHNode>(conf_calloc(1, sizeof(BVHNode)));
+	BVHNode* node = (BVHNode*)tf_placement_new<BVHNode>(tf_calloc(1, sizeof(BVHNode)));
 
 
 	++bvhTree->mBVHNodeCount;
@@ -1315,7 +1309,7 @@ void DeleteBVHTree(BVHNode* node)
 		}
 
 		node->~BVHNode();
-		conf_free(node);
+		tf_free(node);
 	}
 }
 
@@ -1637,13 +1631,13 @@ void DoCalculateMeshSDFTask(void* dataPtr, uintptr_t index)
 			vec3 voxelPos = vec3(offsettedIndex.getX() * sdfVoxelSize.getX(),
 				offsettedIndex.getY() * sdfVoxelSize.getY(), offsettedIndex.getZ() * sdfVoxelSize.getZ()) + sdfVolumeBounds.minBounds;
 
-			int32 outIndex = (zIndex * sdfVolumeDimension.getY() *
+			int32_t outIndex = (zIndex * sdfVolumeDimension.getY() *
 				sdfVolumeDimension.getX() + yIndex * sdfVolumeDimension.getX() + xIndex);
 
 
 			float minDistance = sdfVolumeMaxDist;
-			int32 hit = 0;
-			int32 hitBack = 0;
+			int32_t hit = 0;
+			int32_t hitBack = 0;
 
 			for (int32_t sampleIndex = 0; sampleIndex < directionsList.size(); ++sampleIndex)
 			{
@@ -1654,7 +1648,7 @@ void DoCalculateMeshSDFTask(void* dataPtr, uintptr_t index)
 
 			
 				bool intersectWithBbox = RayIntersectsBox(newRay.startPos, 
-					newRay.GetInvDir(), sdfVolumeBounds.minBounds, sdfVolumeBounds.maxBounds);
+					newRay.invDir, sdfVolumeBounds.minBounds, sdfVolumeBounds.maxBounds);
 
 				//if we pass the cheap bbox testing
 				if (intersectWithBbox)
@@ -1718,46 +1712,52 @@ void DoCalculateMeshSDFTask(void* dataPtr, uintptr_t index)
 }
 
 
-bool GenerateVolumeDataFromFile(SDFVolumeData** outVolumeDataPP, const Path* filePath, const eastl::string& meshName,
+bool GenerateVolumeDataFromFile(SDFVolumeData** outVolumeDataPP, const eastl::string& meshName,
 	float twoSidedWorldSpaceBias)
 {
-    FileStream* newBakedFile = fsOpenFile(filePath, FM_READ_BINARY);
-	if (!newBakedFile)
+	FileStream newBakedFile = {};
+	if (!fsOpenStreamFromPath(RD_OTHER_FILES, meshName.c_str(), FM_READ_BINARY, &newBakedFile))
 	{
 		return false;
 	}
 
-
-	*outVolumeDataPP = conf_new(SDFVolumeData);
+	*outVolumeDataPP = tf_new(SDFVolumeData);
 	SDFVolumeData& outVolumeData = **outVolumeDataPP;
 	outVolumeData.mSubMeshName = meshName;
-
-	outVolumeData.mSDFVolumeSize.setX(fsReadFromStreamInt32(newBakedFile));
-	outVolumeData.mSDFVolumeSize.setY(fsReadFromStreamInt32(newBakedFile));
-	outVolumeData.mSDFVolumeSize.setZ(fsReadFromStreamInt32(newBakedFile));
+	int32_t x, y, z;
+	fsReadFromStream(&newBakedFile, &x, sizeof(int32_t));
+	fsReadFromStream(&newBakedFile, &y, sizeof(int32_t));
+	fsReadFromStream(&newBakedFile, &z, sizeof(int32_t));
+	outVolumeData.mSDFVolumeSize.setX(x);
+	outVolumeData.mSDFVolumeSize.setY(y);
+	outVolumeData.mSDFVolumeSize.setZ(z);
 
 	uint32_t finalSDFVolumeDataCount = outVolumeData.mSDFVolumeSize.getX() * outVolumeData.mSDFVolumeSize.getY()
 		* outVolumeData.mSDFVolumeSize.getZ();
 
 	outVolumeData.mSDFVolumeList.resize(finalSDFVolumeDataCount);
 
-    fsReadFromStream(newBakedFile, &outVolumeData.mSDFVolumeList[0], finalSDFVolumeDataCount * sizeof(float));
-	outVolumeData.mLocalBoundingBox.minBounds = f3Tov3(fsReadFromStreamFloat3(newBakedFile));
-	outVolumeData.mLocalBoundingBox.maxBounds = f3Tov3(fsReadFromStreamFloat3(newBakedFile));
-    outVolumeData.mIsTwoSided = fsReadFromStreamBool(newBakedFile);
+    fsReadFromStream(&newBakedFile, &outVolumeData.mSDFVolumeList[0], finalSDFVolumeDataCount * sizeof(float));
+	float3 minBounds;
+	float3 maxBounds;
+	fsReadFromStream(&newBakedFile, &minBounds, sizeof(float3));
+	fsReadFromStream(&newBakedFile, &maxBounds, sizeof(float3));
+	outVolumeData.mLocalBoundingBox.minBounds = f3Tov3(minBounds);
+	outVolumeData.mLocalBoundingBox.maxBounds = f3Tov3(maxBounds);
+	fsReadFromStream(&newBakedFile, &outVolumeData.mIsTwoSided, sizeof(bool));
 	//outVolumeData.mTwoSidedWorldSpaceBias = newBakedFile.ReadFloat();
 	outVolumeData.mTwoSidedWorldSpaceBias = twoSidedWorldSpaceBias;
 	/*
 	only uses the minimum & maximum of SDF if we ever want to quantized the SDF data
-	for (int32 index = 0; index < outVolumeData.mSDFVolumeList.size(); ++index)
+	for (int32_t index = 0; index < outVolumeData.mSDFVolumeList.size(); ++index)
 	{
 		const float volumeSpaceDist = outVolumeData.mSDFVolumeList[index];
 		outVolumeData.mDistMinMax.setX(fmin(volumeSpaceDist, outVolumeData.mDistMinMax.getX()));
 		outVolumeData.mDistMinMax.setY(fmax(volumeSpaceDist, outVolumeData.mDistMinMax.getY()));
 	}*/
-    fsCloseStream(newBakedFile);
+    fsCloseStream(&newBakedFile);
 
-	LOGF(LogLevel::eINFO, "SDF binary data for %s found & parsed", fsGetPathAsNativeString(filePath));
+	LOGF(LogLevel::eINFO, "SDF binary data for %s found & parsed", meshName.c_str());
 	return true;
 }
 
@@ -1766,16 +1766,17 @@ void GenerateVolumeDataFromMesh(ThreadSystem* threadSystem, SDFMesh* mainMesh, S
 	const eastl::string& subMeshName, float twoSidedWorldSpaceBias = 0.4f,
 	const ivec3& specialMaxVoxelValue = ivec3(0))
 {
-	PathHandle newCompleteCacheFilePath = fsGetPathInResourceDirEnum(RD_OTHER_FILES, subMeshName.c_str());
-
-	if (GenerateVolumeDataFromFile(outVolumeDataPP, newCompleteCacheFilePath, subMeshName, twoSidedWorldSpaceBias))
+	if (shouldExitSDFGeneration) return;
+	
+	if (GenerateVolumeDataFromFile(outVolumeDataPP, subMeshName, twoSidedWorldSpaceBias))
 	{
 		return;
 	}
 
-	LOGF(LogLevel::eINFO, "Generating SDF binary data for %s", fsGetPathAsNativeString(newCompleteCacheFilePath));
 
-	*outVolumeDataPP = conf_new(SDFVolumeData, mainMesh, subMesh);
+	LOGF(LogLevel::eINFO, "Generating SDF binary data for %s", subMeshName.c_str());
+
+	*outVolumeDataPP = tf_new(SDFVolumeData, mainMesh, subMesh);
 
 	SDFVolumeData& outVolumeData = **outVolumeDataPP;
 	outVolumeData.mSubMeshName = subMeshName;
@@ -1866,7 +1867,7 @@ void GenerateVolumeDataFromMesh(ThreadSystem* threadSystem, SDFMesh* mainMesh, S
 	SDFVolumeData::SampleDirectionsList sampleDirectionsList;
 
 	int32_t thetaStep = (int32_t)floor((sqrt((float)numVoxelDistanceSample / (PI * 2.f))));
-	int32 phiStep = (int32_t)floor((float)thetaStep * PI);
+	int32_t phiStep = (int32_t)floor((float)thetaStep * PI);
 
 
 	sampleDirectionsList.reserve(thetaStep * phiStep * 2);
@@ -1889,29 +1890,39 @@ void GenerateVolumeDataFromMesh(ThreadSystem* threadSystem, SDFMesh* mainMesh, S
 
 	for (int32_t zIndex = 0; zIndex < finalSDFVolumeDimension.getZ(); ++zIndex)
 	{
+		if (shouldExitSDFGeneration) break;
+
 		calculateMeshSDFTask.mZIndex = zIndex;
 		DoCalculateMeshSDFTask(&calculateMeshSDFTask, 0);
 	}
 
 	DeleteBVHTree(bvhTree.mRootNode);
 
-    FileStream* portDataFile = fsOpenFile(newCompleteCacheFilePath, FM_WRITE_BINARY);
-    fsWriteToStreamInt32(portDataFile, finalSDFVolumeDimension.getX());
-    fsWriteToStreamInt32(portDataFile, finalSDFVolumeDimension.getY());
-    fsWriteToStreamInt32(portDataFile, finalSDFVolumeDimension.getZ());
-    fsWriteToStream(portDataFile, &outVolumeData.mSDFVolumeList[0], finalSDFVolumeDataCount * sizeof(float));
-    fsWriteToStreamFloat3(portDataFile, v3ToF3(newSDFVolumeBound.minBounds));
-    fsWriteToStreamFloat3(portDataFile, v3ToF3(newSDFVolumeBound.maxBounds));
-    fsWriteToStreamBool(portDataFile, generateAsIfTwoSided);
+	if (shouldExitSDFGeneration) return;
+
+	FileStream portDataFile = {};
+	fsOpenStreamFromPath(RD_OTHER_FILES, subMeshName.c_str(), FM_WRITE_BINARY, &portDataFile);
+	int32_t x = finalSDFVolumeDimension.getX();
+	int32_t y = finalSDFVolumeDimension.getY();
+	int32_t z = finalSDFVolumeDimension.getZ();
+	fsWriteToStream(&portDataFile, &x, sizeof(int32_t));
+	fsWriteToStream(&portDataFile, &y, sizeof(int32_t));
+	fsWriteToStream(&portDataFile, &z, sizeof(int32_t));
+    fsWriteToStream(&portDataFile, &outVolumeData.mSDFVolumeList[0], finalSDFVolumeDataCount * sizeof(float));
+	float3 minBounds = v3ToF3(newSDFVolumeBound.minBounds);
+	float3 maxBounds = v3ToF3(newSDFVolumeBound.maxBounds);
+	fsWriteToStream(&portDataFile, &minBounds, sizeof(float3));
+	fsWriteToStream(&portDataFile, &maxBounds, sizeof(float3));
+    fsWriteToStream(&portDataFile, &generateAsIfTwoSided, sizeof(bool));
 	//portDataFile.WriteFloat(twoSidedWorldSpaceBias);
-    fsCloseStream(portDataFile);
+    fsCloseStream(&portDataFile);
 
 	float minVolumeDist = 1.0f;
 	float maxVolumeDist = -1.0f;
 
 	//we can probably move the calculation of the minimum & maximum distance of the SDF value
 	//into the CalculateMeshSDFValue function
-	for (int32 index = 0; index < outVolumeData.mSDFVolumeList.size(); ++index)
+	for (int32_t index = 0; index < outVolumeData.mSDFVolumeList.size(); ++index)
 	{
 		const float volumeSpaceDist = outVolumeData.mSDFVolumeList[index];
 		minVolumeDist = fmin(volumeSpaceDist, minVolumeDist);
@@ -2535,7 +2546,7 @@ public:
 		{
 			for (int32_t j = 0; j < gridWidth; ++j)
 			{
-				conf_new(ASMTileCacheEntry, this, j * gs_ASMTileSize, i * gs_ASMTileSize);
+				tf_new(ASMTileCacheEntry, this, j * gs_ASMTileSize, i * gs_ASMTileSize);
 			}
 		}
 	}
@@ -2544,7 +2555,7 @@ public:
 	{
 		for (size_t i = m_tiles.size(); i > 0; --i)
 		{
-			conf_delete(m_tiles[i - 1]);
+			tf_delete(m_tiles[i - 1]);
 		}
 	}
 
@@ -2662,7 +2673,7 @@ public:
 		uint32_t maxTilesPerPass = numTilesW * numTilesH;
 
 
-		SCopyQuad* atlasToBulkQuads = (SCopyQuad*) conf_malloc(
+		SCopyQuad* atlasToBulkQuads = (SCopyQuad*) tf_malloc(
 			(sizeof(SCopyQuad) * 2 + sizeof(ASMTileCacheEntry*)) * maxTilesPerPass);
 
 		SCopyQuad* bulkToAtlasQuads = atlasToBulkQuads + maxTilesPerPass;
@@ -2715,14 +2726,13 @@ public:
 				break;
 			}
 
-#if defined(_DURANGO)
-			//On Xbox somehow the texture is initialized with garbage value, so texture that isn't cleared every frame
+#if defined(XBOX)
+			//On Xbox the texture is initialized with garbage value, so texture that isn't cleared every frame
 			//needs to be cleared at the begininng for xbox.
 			if (mDEMFirstTimeRender)
 			{
-				RenderTargetBarrier demRenderTargetBarrier[] = { {pRenderTargetASMDEMAtlas, RESOURCE_STATE_RENDER_TARGET} };
+				RenderTargetBarrier demRenderTargetBarrier[] = { {pRenderTargetASMDEMAtlas, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET} };
 				cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 1, demRenderTargetBarrier);
-
 
 				LoadActionsDesc clearDEMLoadActions = {};
 				clearDEMLoadActions.mClearColorValues[0] = pRenderTargetASMDEMAtlas->mClearValue;
@@ -2741,8 +2751,8 @@ public:
 			cmdBeginGpuTimestampQuery(pCurCmd, gGpuProfileToken, "DEM Atlas To Color");
 
 			RenderTargetBarrier asmAtlasToColorBarrier[] = {
-				{  demWorkBufferColor, RESOURCE_STATE_RENDER_TARGET },
-				{ pRenderTargetASMDEMAtlas, RESOURCE_STATE_SHADER_RESOURCE} };
+				{ demWorkBufferColor, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+				{ pRenderTargetASMDEMAtlas, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE } };
 
 			cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 2, asmAtlasToColorBarrier);
 
@@ -2788,10 +2798,9 @@ public:
 			colorToAtlasLoadAction.mLoadActionStencil = LOAD_ACTION_DONTCARE;
 			colorToAtlasLoadAction.mLoadActionDepth = LOAD_ACTION_DONTCARE;
 
-
 			RenderTargetBarrier asmColorToAtlasBarriers[] = {
-				{  demWorkBufferColor, RESOURCE_STATE_SHADER_RESOURCE },
-				{ pRenderTargetASMDEMAtlas, RESOURCE_STATE_RENDER_TARGET} };
+				{  demWorkBufferColor, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE },
+				{ pRenderTargetASMDEMAtlas, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET} };
 
 			cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 2, asmColorToAtlasBarriers);
 
@@ -2823,7 +2832,7 @@ public:
 			cmdEndGpuTimestampQuery(pCurCmd, gGpuProfileToken);
 		}
 
-		conf_free(atlasToBulkQuads);
+		tf_free(atlasToBulkQuads);
 	}
 
 	const ASMProjectionData* GetFirstRenderBatchProjection() const
@@ -3020,7 +3029,7 @@ public:
 	{
 		while (!mRoots.empty())
 		{
-			conf_delete(mRoots.back());
+			tf_delete(mRoots.back());
 		}
 	}
 
@@ -3083,7 +3092,7 @@ public:
 		{
 			if (mChildren[i])
 			{
-				conf_delete(mChildren[i]);
+				tf_delete(mChildren[i]);
 			}
 		}
 
@@ -3129,7 +3138,7 @@ public:
 	{
 		if (!mChildren[childIndex])
 		{
-			mChildren[childIndex] = conf_new(QuadTreeNode, m_pQuadTree, this);
+			mChildren[childIndex] = tf_new(QuadTreeNode, m_pQuadTree, this);
 			++mNumChildren;
 		}
 		return mChildren[childIndex];
@@ -3211,7 +3220,7 @@ public:
 	ASMFrustum(const Config& cfg, bool useMRF, bool isPreRender) :
 		mIsPrerender(isPreRender),
 		m_cfg(cfg)
-#if defined(_DURANGO)
+#if defined(XBOX)
 		,mFirstTimeRender(true)
 #endif
 	{
@@ -3363,8 +3372,8 @@ public:
 					QuadTreeNode* pNode = m_quadTree.FindRoot(nodeBBox);
 					if (pNode == nullptr)
 					{
-						QuadTreeNode* temp = (QuadTreeNode*)conf_malloc(sizeof(QuadTreeNode));
-						pNode = conf_placement_new<QuadTreeNode>(temp, &m_quadTree, (QuadTreeNode*)0);
+						QuadTreeNode* temp = (QuadTreeNode*)tf_malloc(sizeof(QuadTreeNode));
+						pNode = tf_placement_new<QuadTreeNode>(temp, &m_quadTree, (QuadTreeNode*)0);
 						pNode->mBBox = nodeBBox;
 					}
 
@@ -3672,7 +3681,7 @@ private:
 				}
 				return;
 			}
-			conf_delete(pNode);
+			tf_delete(pNode);
 		}
 	}
 
@@ -3693,7 +3702,7 @@ private:
 		eastl::vector<SortStruct> nodesToSort;
 		nodesToSort.reserve(nodes.size());
 
-		//SortStruct* nodesToSort = (SortStruct*)conf_malloc(
+		//SortStruct* nodesToSort = (SortStruct*)tf_malloc(
 			//sizeof(SortStruct) * nodes.size());
 
 		vec2 distMax = sortRegionMaxSize + vec2(tileSize, tileSize);
@@ -3974,7 +3983,7 @@ private:
 	{
 		LoadActionsDesc loadActions = {};
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_DONTCARE;
-#if defined(_DURANGO)
+#if defined(XBOX)
 		if (mFirstTimeRender)
 		{
 			loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
@@ -4008,11 +4017,6 @@ private:
 
 		uint32_t firstQuad = 0;
 		uint32_t numQuads = 0;
-
-		RenderTargetBarrier* targetBarriers = (RenderTargetBarrier*)alloca((m_cfg.m_maxRefinement + 1) * sizeof(RenderTargetBarrier));
-		for (int32_t mip = m_cfg.m_maxRefinement; mip >= 0; --mip)
-			targetBarriers[mip] = { m_indirectionTexturesMips[mip], RESOURCE_STATE_RENDER_TARGET };
-		cmdResourceBarrier(curRendererContext->m_pCmd, 0, NULL, 0, NULL, m_cfg.m_maxRefinement + 1, targetBarriers);
 
 		for (int32_t mip = m_cfg.m_maxRefinement; mip >= 0; --mip)
 		{
@@ -4058,7 +4062,7 @@ private:
 
 		
 		RenderTargetBarrier lodBarrier[] = {
-			{lodClampTexture, RESOURCE_STATE_RENDER_TARGET} };
+			{lodClampTexture, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET} };
 
 		cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 1, lodBarrier);
 
@@ -4086,12 +4090,10 @@ private:
 	}
 
 private:
-#if defined(_DURANGO)
+#if defined(XBOX)
 	bool mFirstTimeRender;
 #endif
 };
-
-
 
 void ASMTileCache::RenderTiles(
 	uint32_t numTiles,
@@ -4120,7 +4122,7 @@ void ASMTileCache::RenderTiles(
 		-1.f / static_cast<float>(workBufferHeight), 0.f));
 
 
-	SCopyQuad* copyDepthQuads = (SCopyQuad*)conf_malloc(sizeof(SCopyQuad) * (maxTilesPerPass + numTiles));
+	SCopyQuad* copyDepthQuads = (SCopyQuad*)tf_malloc(sizeof(SCopyQuad) * (maxTilesPerPass + numTiles));
 	SCopyQuad* copyDEMQuads = copyDepthQuads + maxTilesPerPass;
 
 	//float invAtlasWidth = 1.0f / float(m_depthAtlasWidth);
@@ -4138,11 +4140,10 @@ void ASMTileCache::RenderTiles(
 
 		if (tilesToRender > 0)
 		{
-			RenderTargetBarrier textureBarriers[] = { {
-					workBufferDepth, RESOURCE_STATE_DEPTH_WRITE} };
-
-			BufferBarrier bufferBarriers[] = { {pGeom->pVertexBuffers[0], RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER} };
-			cmdResourceBarrier(pCurCmd, 1, bufferBarriers, 0, NULL, 1, textureBarriers);
+			RenderTargetBarrier textureBarriers[] = {
+				{ workBufferDepth, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_DEPTH_WRITE }
+			};
+			cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 1, textureBarriers);
 
 			setRenderTarget(context.m_pRendererContext->m_pCmd, 0, NULL,
 				workBufferDepth, &loadActions, vec2(0.f, 0.f), vec2((float)workBufferDepth->mWidth, (float)workBufferDepth->mHeight));
@@ -4200,8 +4201,8 @@ void ASMTileCache::RenderTiles(
 		cmdBindRenderTargets(curRendererContext->m_pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
 		RenderTargetBarrier copyDepthBarrier[] = {
-			{ pRenderTargetASMDepthAtlas, RESOURCE_STATE_RENDER_TARGET },
-			{ workBufferDepth, RESOURCE_STATE_SHADER_RESOURCE }
+			{ pRenderTargetASMDepthAtlas, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+			{ workBufferDepth, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE }
 		};
 
 		cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 2, copyDepthBarrier);
@@ -4210,7 +4211,7 @@ void ASMTileCache::RenderTiles(
 		copyDepthQuadLoadAction.mClearColorValues[0] = pRenderTargetASMDepthAtlas->mClearValue;
 		copyDepthQuadLoadAction.mLoadActionsColor[0] = LOAD_ACTION_DONTCARE;
 
-#if defined(_DURANGO)
+#if defined(XBOX)
 		if (mDepthFirstTimeRender)
 		{
 			copyDepthQuadLoadAction.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
@@ -4254,16 +4255,15 @@ void ASMTileCache::RenderTiles(
 		i += tilesToRender;
 
 		cmdBindRenderTargets(curRendererContext->m_pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
-}
+	}
+
+	RenderTargetBarrier asmCopyDEMBarrier[] = {
+		{ pRenderTargetASMDepthAtlas, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
+	};
+	cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 1, asmCopyDEMBarrier);
 
 	if (numCopyDEMQuads > 0)
 	{
-
-		RenderTargetBarrier asmCopyDEMBarrier[] = { {  pRenderTargetASMDEMAtlas, RESOURCE_STATE_RENDER_TARGET},
-		{pRenderTargetASMDepthAtlas, RESOURCE_STATE_SHADER_RESOURCE} };
-
-		cmdResourceBarrier(pCurCmd, 0, NULL, 0, NULL, 2, asmCopyDEMBarrier);
-
 		LoadActionsDesc copyDEMQuadLoadAction = {};
 		copyDEMQuadLoadAction.mClearColorValues[0] = pRenderTargetASMDepthAtlas->mClearValue;
 		copyDEMQuadLoadAction.mLoadActionsColor[0] = LOAD_ACTION_DONTCARE;
@@ -4276,8 +4276,6 @@ void ASMTileCache::RenderTiles(
 			&copyDEMQuadLoadAction, vec2(0.f, 0.f), vec2((float)pRenderTargetASMDEMAtlas->mWidth,
 			(float)pRenderTargetASMDEMAtlas->mHeight));
 
-	
-
 		BufferUpdateDesc copyDEMQuadUpdateUbDesc = { pBufferASMCopyDEMPackedQuadsUniform[gFrameIndex] };
 		beginUpdateResource(&copyDEMQuadUpdateUbDesc);
 		memcpy(copyDEMQuadUpdateUbDesc.pMappedData, &copyDEMQuads[0], sizeof(SCopyQuad) * numCopyDEMQuads);
@@ -4289,9 +4287,9 @@ void ASMTileCache::RenderTiles(
 		cmdDraw(pCurCmd, numCopyDEMQuads * 6, 0);
 
 		cmdBindRenderTargets(curRendererContext->m_pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
-
 	}
-	conf_free(copyDepthQuads);
+
+	tf_free(copyDepthQuads);
 }
 
 void ASMTileCacheEntry::PrepareRender(const ASMSShadowMapPrepareRenderContext& context)
@@ -4300,7 +4298,6 @@ void ASMTileCacheEntry::PrepareRender(const ASMSShadowMapPrepareRenderContext& c
 		vec2((static_cast<float> (gs_ASMTileSize) / static_cast<float>(m_viewport.w)))
 	);
 }
-
 
 class ASM
 {
@@ -4320,21 +4317,21 @@ public:
 	ASM()
 		:m_preRenderDone(false)
 	{
-		m_cache = conf_new(ASMTileCache);
+		m_cache = tf_new(ASMTileCache);
 		static const ASMFrustum::Config longRangeCfg =
 		{
 			gs_ASMLargestTileWorldSize, gs_ASMDistanceMax, gs_ASMMaxRefinement, INT_MAX, gsASMIndexSize, true,
 			{ SQR(gs_ASMDistanceMax), SQR(120.0f), SQR(60.0f), SQR(30.0f), SQR(10.0f) }
 		};
-		m_longRangeShadows = conf_new(ASMFrustum, longRangeCfg, true, false);
-		m_longRangePreRender = conf_new(ASMFrustum, longRangeCfg, true, true);
+		m_longRangeShadows = tf_new(ASMFrustum, longRangeCfg, true, false);
+		m_longRangePreRender = tf_new(ASMFrustum, longRangeCfg, true, true);
 		Reset();
 	}
 	~ASM()
 	{
-		conf_delete(m_cache);
-		conf_delete(m_longRangeShadows);
-		conf_delete(m_longRangePreRender);
+		tf_delete(m_cache);
+		tf_delete(m_longRangeShadows);
+		tf_delete(m_longRangePreRender);
 	}
 
 
@@ -4699,8 +4696,7 @@ void SetupASMDebugTextures()
 
 		if (!pUIASMDebugTexturesWindow)
 		{
-			GuiDesc guiDesc = {};
-			guiDesc.mStartSize = vec2(guiDesc.mStartSize.getX(), guiDesc.mStartSize.getY());
+			GuiDesc guiDesc = {};			
 			guiDesc.mStartPosition.setY(screenSize.getY() - texSize.getY() - 50.f);
 			pUIASMDebugTexturesWindow = gAppUI.AddGuiComponent("ASM Debug Textures Info", &guiDesc);
 			ASSERT(pUIASMDebugTexturesWindow);
@@ -4783,19 +4779,17 @@ class LightShadowPlayground: public IApp
 
 	void initSDFMeshes()
 	{
-		pSDFMeshes[0] = conf_new(SDFMesh);
-		pSDFMeshes[1] = conf_new(SDFMesh);
-		pSDFMeshes[2] = conf_new(SDFMesh);
-        PathHandle model1Path = fsGetPathInResourceDirEnum(RD_MESHES, gSDFModelNames[1]);
-		loadSDFMeshAlphaTested(pThreadSystem, model1Path, pSDFMeshes[1], MESH_SCALE,
+		pSDFMeshes[0] = tf_new(SDFMesh);
+		pSDFMeshes[1] = tf_new(SDFMesh);
+		pSDFMeshes[2] = tf_new(SDFMesh);
+     
+		loadSDFMeshAlphaTested(pThreadSystem, gSDFModelNames[1], pSDFMeshes[1], MESH_SCALE,
 			SAN_MIGUEL_OFFSETX, ENABLE_SDF_MESH_GENERATION, gSDFVolumeInstances, &GenerateVolumeDataFromFile);
 
-        PathHandle model0Path = fsGetPathInResourceDirEnum(RD_MESHES, gSDFModelNames[0]);
-		loadSDFMesh(pThreadSystem, model0Path, pSDFMeshes[0], MESH_SCALE,
+		loadSDFMesh(pThreadSystem, gSDFModelNames[0], pSDFMeshes[0], MESH_SCALE,
 			SAN_MIGUEL_OFFSETX, ENABLE_SDF_MESH_GENERATION, gSDFVolumeInstances, &GenerateVolumeDataFromFile);
 
-        PathHandle model2Path = fsGetPathInResourceDirEnum(RD_MESHES, gSDFModelNames[2]);
-		loadSDFMesh(pThreadSystem, model2Path, pSDFMeshes[2], MESH_SCALE,
+		loadSDFMesh(pThreadSystem, gSDFModelNames[2], pSDFMeshes[2], MESH_SCALE,
 			SAN_MIGUEL_OFFSETX, ENABLE_SDF_MESH_GENERATION, gSDFVolumeInstances, &GenerateVolumeDataFromFile);
 
 		gGenerateMissingSDFTask[0] = { pThreadSystem, pSDFMeshes[0], &gSDFVolumeInstances };
@@ -4805,9 +4799,9 @@ class LightShadowPlayground: public IApp
 
 	void destroySDFMeshes()
 	{
-		conf_delete(pSDFMeshes[0]);
-		conf_delete(pSDFMeshes[1]);
-		conf_delete(pSDFMeshes[2]);
+		tf_delete(pSDFMeshes[0]);
+		tf_delete(pSDFMeshes[1]);
+		tf_delete(pSDFMeshes[2]);
 	}
 
 	static void checkForMissingSDFData()
@@ -4857,30 +4851,15 @@ class LightShadowPlayground: public IApp
 	bool Init() override
 	{
         // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/09_LightShadowPlayground");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../../../Art/SanMiguel_3/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,          "../../../../Art/SanMiguel_3/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,    "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,      "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_OTHER_FILES,      "../../UnitTestResources/SDF");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,  "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,    "../../../../Middleware_3/UI");
-        }
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES,	"Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES,	"CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG,		"GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES,			"Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS,			"Fonts");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_MESHES,			"Meshes");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_OTHER_FILES,		"SDF");
         
 		initThreadSystem(&pThreadSystem);
-
-		// Overwrite rootpath is required because Textures and meshes are not in /Textures and /Meshes.
-		// We need to set the modified root path so that filesystem can find the meshes and textures.
-        PathHandle mainDirPath = fsGetResourceDirEnumPath(RD_ROOT);
-#ifndef _DURANGO
-        PathHandle sdfDirPath = fsGetResourceDirEnumPath(RD_OTHER_FILES);
-        fsCreateDirectory(sdfDirPath);
-#endif
 
 		RendererDesc settings = { NULL };
 		initRenderer(GetName(), &settings, &pRenderer);
@@ -4892,12 +4871,15 @@ class LightShadowPlayground: public IApp
 
 		// Create the command pool and the command lists used to store GPU commands.
 		// One Cmd list per back buffer image is stored for triple buffering.
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pGraphicsQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
 
 		addFence(pRenderer, &pTransitionFences);
 		addSemaphore(pRenderer, &pImageAcquiredSemaphore);
@@ -4907,7 +4889,7 @@ class LightShadowPlayground: public IApp
 		if (!gAppUI.Init(pRenderer))
 			return false;
 
-		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 
 		initProfiler();
 		/************************************************************************/
@@ -4920,7 +4902,7 @@ class LightShadowPlayground: public IApp
 		quadVbDesc.mDesc.mSize = quadDataSize;
 		quadVbDesc.pData = gQuadVertices;
 		quadVbDesc.ppBuffer = &pBufferQuadVertex;
-		addResource(&quadVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&quadVbDesc, NULL);
 
 		/************************************************************************/
 		// Setup constant buffer data
@@ -4930,13 +4912,13 @@ class LightShadowPlayground: public IApp
 		vbConstantUBDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
 		vbConstantUBDesc.mDesc.mSize = sizeof(VisibilityBufferConstants);
 		vbConstantUBDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
-		vbConstantUBDesc.mDesc.pDebugName = L"Visibility constant Buffer Desc";
+		vbConstantUBDesc.mDesc.pName = "Visibility constant Buffer Desc";
 		vbConstantUBDesc.pData = NULL;
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			vbConstantUBDesc.ppBuffer = &pBufferVisibilityBufferConstants[i];
-			addResource(&vbConstantUBDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&vbConstantUBDesc, NULL);
 		}
 
 		BufferLoadDesc ubDesc = {};
@@ -4944,9 +4926,6 @@ class LightShadowPlayground: public IApp
 		ubDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
 		ubDesc.mDesc.mSize = sizeof(MeshInfoUniformBlock);
 		ubDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
-#if defined(METAL)
-		ubDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT | BUFFER_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
 		ubDesc.pData = NULL;
 
 		for (uint32_t j = 0; j < MESH_COUNT; ++j)
@@ -4954,10 +4933,10 @@ class LightShadowPlayground: public IApp
 			for (uint32_t i = 0; i < gImageCount; ++i)
 			{
 				ubDesc.ppBuffer = &pBufferMeshTransforms[j][i];
-				addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+				addResource(&ubDesc, NULL);
 
 				ubDesc.ppBuffer = &pBufferMeshShadowProjectionTransforms[j][i];
-				addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+				addResource(&ubDesc, NULL);
 			}
 		}
 		BufferLoadDesc ubEsmBlurDesc = {};
@@ -4969,7 +4948,7 @@ class LightShadowPlayground: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubEsmBlurDesc.ppBuffer = &pBufferESMUniform[i];
-			addResource(&ubEsmBlurDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubEsmBlurDesc, NULL);
 		}
 
 		BufferLoadDesc quadUbDesc = {};
@@ -4981,7 +4960,7 @@ class LightShadowPlayground: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			quadUbDesc.ppBuffer = &pBufferQuadUniform[i];
-			addResource(&quadUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&quadUbDesc, NULL);
 		}
 
 		BufferLoadDesc asmAtlasQuadsUbDesc = {};
@@ -4989,21 +4968,18 @@ class LightShadowPlayground: public IApp
 		asmAtlasQuadsUbDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
 		asmAtlasQuadsUbDesc.mDesc.mSize = sizeof(ASMAtlasQuadsUniform);
 		asmAtlasQuadsUbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
-#if defined(METAL)
-		asmAtlasQuadsUbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT | BUFFER_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
 		asmAtlasQuadsUbDesc.pData = NULL;
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			asmAtlasQuadsUbDesc.mDesc.mSize = sizeof(ASMAtlasQuadsUniform);
 			
 			asmAtlasQuadsUbDesc.ppBuffer = &pBufferASMAtlasQuadsUniform[i];
-			addResource(&asmAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&asmAtlasQuadsUbDesc, NULL);
 			
 			asmAtlasQuadsUbDesc.mDesc.mSize = sizeof(ASMPackedAtlasQuadsUniform);
 
 			asmAtlasQuadsUbDesc.ppBuffer = &pBufferASMClearIndirectionQuadsUniform[i];
-			addResource(&asmAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&asmAtlasQuadsUbDesc, NULL);
 		}
 
 
@@ -5012,36 +4988,33 @@ class LightShadowPlayground: public IApp
 		asmPackedAtlasQuadsUbDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
 		asmPackedAtlasQuadsUbDesc.mDesc.mSize = sizeof(ASMPackedAtlasQuadsUniform) * 2;
 		asmPackedAtlasQuadsUbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
-#if defined(METAL)
-		asmPackedAtlasQuadsUbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT | BUFFER_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
 		for (uint32_t i = 0; i < gs_ASMMaxRefinement + 1; ++i)
 		{
 			for (uint32_t k = 0; k < gImageCount; ++k)
 			{
 				asmPackedAtlasQuadsUbDesc.ppBuffer = 
 					&pBufferASMPackedIndirectionQuadsUniform[i][k];
-				addResource(&asmPackedAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+				addResource(&asmPackedAtlasQuadsUbDesc, NULL);
 
 				asmPackedAtlasQuadsUbDesc.ppBuffer =
 					&pBufferASMPackedPrerenderIndirectionQuadsUniform[i][k];
-				addResource(&asmPackedAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+				addResource(&asmPackedAtlasQuadsUbDesc, NULL);
 			}
 		}
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			asmPackedAtlasQuadsUbDesc.ppBuffer = &pBufferASMCopyDEMPackedQuadsUniform[i];
-			addResource(&asmPackedAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&asmPackedAtlasQuadsUbDesc, NULL);
 
 			asmPackedAtlasQuadsUbDesc.ppBuffer = &pBufferASMColorToAtlasPackedQuadsUniform[i];
-			addResource(&asmPackedAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&asmPackedAtlasQuadsUbDesc, NULL);
 
 			asmPackedAtlasQuadsUbDesc.ppBuffer = &pBufferASMAtlasToColorPackedQuadsUniform[i];
-			addResource(&asmPackedAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&asmPackedAtlasQuadsUbDesc, NULL);
 
 			asmPackedAtlasQuadsUbDesc.ppBuffer = &pBufferASMLodClampPackedQuadsUniform[i];
-			addResource(&asmPackedAtlasQuadsUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&asmPackedAtlasQuadsUbDesc, NULL);
 		}
 
 		BufferLoadDesc asmDataUbDesc = {};
@@ -5049,14 +5022,11 @@ class LightShadowPlayground: public IApp
 		asmDataUbDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_CPU_TO_GPU;
 		asmDataUbDesc.mDesc.mSize = sizeof(ASMUniformBlock);
 		asmDataUbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
-#if defined(METAL)
-		asmDataUbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_OWN_MEMORY_BIT | BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
-#endif
 		
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			asmDataUbDesc.ppBuffer = &pBufferASMDataUniform[i];
-			addResource(&asmDataUbDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&asmDataUbDesc, NULL);
 		}
 
 		BufferLoadDesc camUniDesc = {};
@@ -5065,13 +5035,10 @@ class LightShadowPlayground: public IApp
 		camUniDesc.mDesc.mSize = sizeof(CameraUniform);
 		camUniDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT ;
 		camUniDesc.pData = &gCameraUniformData;
-#if defined(METAL)
-		camUniDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT | BUFFER_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			camUniDesc.ppBuffer = &pBufferCameraUniform[i];
-			addResource(&camUniDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&camUniDesc, NULL);
 		}
 		BufferLoadDesc renderSettingsDesc = {};
 		renderSettingsDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -5082,7 +5049,7 @@ class LightShadowPlayground: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			renderSettingsDesc.ppBuffer = &pBufferRenderSettings[i];
-			addResource(&renderSettingsDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&renderSettingsDesc, NULL);
 		}
 
 		BufferLoadDesc lightUniformDesc = {};
@@ -5094,7 +5061,7 @@ class LightShadowPlayground: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			lightUniformDesc.ppBuffer = &pBufferLightUniform[i];
-			addResource(&lightUniformDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&lightUniformDesc, NULL);
 		}
 		
 
@@ -5105,10 +5072,10 @@ class LightShadowPlayground: public IApp
 		meshSDFUniformDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
 		meshSDFUniformDesc.pData = NULL;
 
-		for (uint32 i = 0; i < gImageCount; ++i)
+		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			meshSDFUniformDesc.ppBuffer = &pBufferMeshSDFConstants[i];
-			addResource(&meshSDFUniformDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&meshSDFUniformDesc, NULL);
 		}
 
 
@@ -5119,53 +5086,53 @@ class LightShadowPlayground: public IApp
 		updateSDFVolumeTextureAtlasUniformDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
 		updateSDFVolumeTextureAtlasUniformDesc.pData = NULL;
 
-		for (uint32 i = 0; i < gImageCount; ++i)
+		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			updateSDFVolumeTextureAtlasUniformDesc.ppBuffer = 
 				&pBufferUpdateSDFVolumeTextureAtlasConstants[i];
-			addResource(&updateSDFVolumeTextureAtlasUniformDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&updateSDFVolumeTextureAtlasUniformDesc, NULL);
 		}
 
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 			return false;
 
 		eastl::string str_formatter = "";
 		
 		ShaderLoadDesc indirectDepthPassShaderDesc = {};
 		indirectDepthPassShaderDesc.mStages[0] = {
-			"meshDepthPass.vert",  NULL, 0, RD_SHADER_SOURCES };
+			"meshDepthPass.vert",  NULL, 0 };
 
 		ShaderLoadDesc indirectAlphaDepthPassShaderDesc = {};
 		indirectAlphaDepthPassShaderDesc.mStages[0] = {
-			"meshDepthPassAlpha.vert", NULL, 0, RD_SHADER_SOURCES };
+			"meshDepthPassAlpha.vert", NULL, 0 };
 		indirectAlphaDepthPassShaderDesc.mStages[1] = {
-			"meshDepthPassAlpha.frag", NULL, 0, RD_SHADER_SOURCES };
+			"meshDepthPassAlpha.frag", NULL, 0 };
 
 		ShaderLoadDesc ASMCopyDepthQuadsShaderDesc = {};
-		ASMCopyDepthQuadsShaderDesc.mStages[0] = {"copyDepthQuads.vert", NULL, 0, RD_SHADER_SOURCES};
-		ASMCopyDepthQuadsShaderDesc.mStages[1] = { "copyDepthQuads.frag", NULL, 0, RD_SHADER_SOURCES };
+		ASMCopyDepthQuadsShaderDesc.mStages[0] = {"copyDepthQuads.vert", NULL, 0 };
+		ASMCopyDepthQuadsShaderDesc.mStages[1] = { "copyDepthQuads.frag", NULL, 0 };
 
 		ShaderLoadDesc quadShaderDesc = {};
-		quadShaderDesc.mStages[0] = { "quad.vert", NULL, 0, RD_SHADER_SOURCES };
-		quadShaderDesc.mStages[1] = { "quad.frag", NULL, 0, RD_SHADER_SOURCES };
+		quadShaderDesc.mStages[0] = { "quad.vert", NULL, 0 };
+		quadShaderDesc.mStages[1] = { "quad.frag", NULL, 0 };
 
 
 		ShaderLoadDesc ASMFillIndirectionShaderDesc = {};
 		ASMFillIndirectionShaderDesc.mStages[0] = { "fill_Indirection.vert", 
-			NULL, 0, RD_SHADER_SOURCES };
+			NULL, 0 };
 		ASMFillIndirectionShaderDesc.mStages[1] = { "fill_Indirection.frag",
-			NULL, 0, RD_SHADER_SOURCES };
+			NULL, 0 };
 
 		ShaderLoadDesc ASMCopyDEMQuadsShaderDesc = {};
-		ASMCopyDEMQuadsShaderDesc.mStages[0] = { "copyDEMQuads.vert", NULL, 0, RD_SHADER_SOURCES };
-		ASMCopyDEMQuadsShaderDesc.mStages[1] = { "copyDEMQuads.frag", NULL, 0, RD_SHADER_SOURCES };
+		ASMCopyDEMQuadsShaderDesc.mStages[0] = { "copyDEMQuads.vert", NULL, 0 };
+		ASMCopyDEMQuadsShaderDesc.mStages[1] = { "copyDEMQuads.frag", NULL, 0 };
 
 		addShader(pRenderer, &ASMCopyDEMQuadsShaderDesc, &pShaderASMCopyDEM);
 		
 
 		ShaderLoadDesc ASMGenerateDEMShaderDesc = {};
-		ASMGenerateDEMShaderDesc.mStages[0] = { "generateAsmDEM.vert", NULL, 0, RD_SHADER_SOURCES };
-		ASMGenerateDEMShaderDesc.mStages[1] = { "generateAsmDEM.frag", NULL, 0, RD_SHADER_SOURCES };
+		ASMGenerateDEMShaderDesc.mStages[0] = { "generateAsmDEM.vert", NULL, 0 };
+		ASMGenerateDEMShaderDesc.mStages[1] = { "generateAsmDEM.frag", NULL, 0 };
 		addShader(pRenderer, &ASMGenerateDEMShaderDesc, &pShaderASMGenerateDEM);
 
 
@@ -5173,68 +5140,68 @@ class LightShadowPlayground: public IApp
 
 
 		ShaderLoadDesc visibilityBufferPassShaderDesc = {};
-		visibilityBufferPassShaderDesc.mStages[0] = { "visibilityBufferPass.vert", NULL, 0, RD_SHADER_SOURCES };
-		visibilityBufferPassShaderDesc.mStages[1] = { "visibilityBufferPass.frag", NULL, 0, RD_SHADER_SOURCES };
-#if defined(ORBIS)
+		visibilityBufferPassShaderDesc.mStages[0] = { "visibilityBufferPass.vert", NULL, 0, NULL, SHADER_STAGE_LOAD_FLAG_ENABLE_PS_PRIMITIVEID };
+		visibilityBufferPassShaderDesc.mStages[1] = { "visibilityBufferPass.frag", NULL, 0, NULL, SHADER_STAGE_LOAD_FLAG_ENABLE_PS_PRIMITIVEID };
+#if defined(ORBIS) || defined(PROSPERO)
 		// No SV_PrimitiveID in pixel shader on ORBIS. Only available in gs stage so we need
 		// a passthrough gs
-		visibilityBufferPassShaderDesc.mStages[2] = { "visibilityBufferPass.geom", NULL, 0, RD_SHADER_SOURCES };
+		visibilityBufferPassShaderDesc.mStages[2] = { "visibilityBufferPass.geom", NULL, 0 };
 #endif
 		addShader(pRenderer, &visibilityBufferPassShaderDesc, &pShaderVBBufferPass[GEOMSET_OPAQUE]);
 
 		ShaderLoadDesc visibilityBufferPassAlphaShaderDesc = {};
-		visibilityBufferPassAlphaShaderDesc.mStages[0] = { "visibilityBufferPassAlpha.vert", NULL, 0, RD_SHADER_SOURCES };
-		visibilityBufferPassAlphaShaderDesc.mStages[1] = { "visibilityBufferPassAlpha.frag", NULL, 0, RD_SHADER_SOURCES };
-#if defined(ORBIS)
+		visibilityBufferPassAlphaShaderDesc.mStages[0] = { "visibilityBufferPassAlpha.vert", NULL, 0, NULL, SHADER_STAGE_LOAD_FLAG_ENABLE_PS_PRIMITIVEID };
+		visibilityBufferPassAlphaShaderDesc.mStages[1] = { "visibilityBufferPassAlpha.frag", NULL, 0, NULL, SHADER_STAGE_LOAD_FLAG_ENABLE_PS_PRIMITIVEID };
+#if defined(ORBIS) || defined(PROSPERO)
 		// No SV_PrimitiveID in pixel shader on ORBIS. Only available in gs stage so we need
 		// a passthrough gs
-		visibilityBufferPassAlphaShaderDesc.mStages[2] = { "visibilityBufferPassAlpha.geom", NULL, 0, RD_SHADER_SOURCES };
+		visibilityBufferPassAlphaShaderDesc.mStages[2] = { "visibilityBufferPassAlpha.geom", NULL, 0 };
 #endif
 		addShader(pRenderer, &visibilityBufferPassAlphaShaderDesc, &pShaderVBBufferPass[GEOMSET_ALPHATESTED]);
 	
 		ShaderLoadDesc clearBuffersShaderDesc = {};
-		clearBuffersShaderDesc.mStages[0] = { "clearVisibilityBuffers.comp", NULL, 0, RD_SHADER_SOURCES };
+		clearBuffersShaderDesc.mStages[0] = { "clearVisibilityBuffers.comp", NULL, 0 };
 		addShader(pRenderer, &clearBuffersShaderDesc, &pShaderClearBuffers);
 
 
 		ShaderLoadDesc triangleFilteringShaderDesc = {};
-		triangleFilteringShaderDesc.mStages[0] = { "triangleFiltering.comp", NULL, 0, RD_SHADER_SOURCES };
+		triangleFilteringShaderDesc.mStages[0] = { "triangleFiltering.comp", NULL, 0 };
 		addShader(pRenderer, &triangleFilteringShaderDesc, &pShaderTriangleFiltering);
 
 		ShaderLoadDesc batchCompactionShaderDesc = {};
-		batchCompactionShaderDesc.mStages[0] = { "batchCompaction.comp", NULL, 0, RD_SHADER_SOURCES };
+		batchCompactionShaderDesc.mStages[0] = { "batchCompaction.comp", NULL, 0 };
 		addShader(pRenderer, &batchCompactionShaderDesc, &pShaderBatchCompaction);
 
 		ShaderLoadDesc updateSDFVolumeTextureAtlasShaderDesc = {};
-		updateSDFVolumeTextureAtlasShaderDesc.mStages[0] = { "updateRegion3DTexture.comp", NULL, 0, RD_SHADER_SOURCES };
+		updateSDFVolumeTextureAtlasShaderDesc.mStages[0] = { "updateRegion3DTexture.comp", NULL, 0 };
 		
 
 		addShader(pRenderer, &updateSDFVolumeTextureAtlasShaderDesc, &pShaderUpdateSDFVolumeTextureAtlas);
 
 		ShaderLoadDesc meshSDFVisualizationShaderDesc = {};
-		meshSDFVisualizationShaderDesc.mStages[0] = { "visualizeSDFMesh.comp", NULL, 0, RD_SHADER_SOURCES };
+		meshSDFVisualizationShaderDesc.mStages[0] = { "visualizeSDFMesh.comp", NULL, 0 };
 		addShader(pRenderer, &meshSDFVisualizationShaderDesc, &pShaderSDFMeshVisualization);
 
 		ShaderLoadDesc sdfShadowMeshShaderDesc = {};
-		sdfShadowMeshShaderDesc.mStages[0] = { "bakedSDFMeshShadow.comp", NULL, 0, RD_SHADER_SOURCES };
+		sdfShadowMeshShaderDesc.mStages[0] = { "bakedSDFMeshShadow.comp", NULL, 0 };
 		addShader(pRenderer, &sdfShadowMeshShaderDesc, &pShaderSDFMeshShadow);
 
 		ShaderLoadDesc upSampleSDFShadowShaderDesc = {};
-		upSampleSDFShadowShaderDesc.mStages[0] = { "upsampleSDFShadow.vert", NULL, 0, RD_SHADER_SOURCES };
-		upSampleSDFShadowShaderDesc.mStages[1] = { "upsampleSDFShadow.frag", NULL, 0, RD_SHADER_SOURCES };
+		upSampleSDFShadowShaderDesc.mStages[0] = { "upsampleSDFShadow.vert", NULL, 0 };
+		upSampleSDFShadowShaderDesc.mStages[1] = { "upsampleSDFShadow.frag", NULL, 0 };
 
 		addShader(pRenderer, &upSampleSDFShadowShaderDesc, &pShaderUpsampleSDFShadow);
 
 
 		ShaderLoadDesc presentShaderDesc = {};
-		presentShaderDesc.mStages[0] = { "display.vert", NULL, 0, RD_SHADER_SOURCES };
-		presentShaderDesc.mStages[1] = { "display.frag", NULL, 0, RD_SHADER_SOURCES };
+		presentShaderDesc.mStages[0] = { "display.vert", NULL, 0 };
+		presentShaderDesc.mStages[1] = { "display.frag", NULL, 0 };
 		addShader(pRenderer, &presentShaderDesc, &pShaderPresentPass);
 
 
 		ShaderLoadDesc visibilityBufferShadeShaderDesc = {};
-		visibilityBufferShadeShaderDesc.mStages[0] = { "visibilityBufferShade.vert", NULL, 0, RD_SHADER_SOURCES };
-		visibilityBufferShadeShaderDesc.mStages[1] = { "visibilityBufferShade.frag", NULL, 0, RD_SHADER_SOURCES };
+		visibilityBufferShadeShaderDesc.mStages[0] = { "visibilityBufferShade.vert", NULL, 0 };
+		visibilityBufferShadeShaderDesc.mStages[1] = { "visibilityBufferShade.frag", NULL, 0 };
 
 
 		/************************************************************************/
@@ -5245,7 +5212,7 @@ class LightShadowPlayground: public IApp
 
 		addShader(pRenderer, &ASMCopyDepthQuadsShaderDesc, &pShaderASMCopyDepthQuadPass);
 		addShader(pRenderer, &ASMFillIndirectionShaderDesc, &pShaderASMFillIndirection);
-#if defined(ORBIS)
+#if defined(ORBIS) || defined(PROSPERO)
 		ShaderMacro fp16Macro = { "USE_OUTPUT_MODE_FP16" };
 		ASMFillIndirectionShaderDesc.mStages[1].mMacroCount = 1;
 		ASMFillIndirectionShaderDesc.mStages[1].pMacros = &fp16Macro;
@@ -5343,14 +5310,13 @@ class LightShadowPlayground: public IApp
 		initSDFMeshes();
 
 		SyncToken token = {};
-        PathHandle sceneFullPath = fsGetPathInResourceDirEnum(RD_MESHES, gSceneName);
 		//pScene = loadScene(sceneFullPath.c_str(), MESH_SCALE, SAN_MIGUEL_OFFSETX, 0.0f, 0.0f);
-		Scene* pScene = loadScene(sceneFullPath, &token, SAN_MIGUEL_ORIGINAL_SCALE, SAN_MIGUEL_ORIGINAL_OFFSETX, 0.0f, 0.0f);
+		Scene* pScene = loadScene(gSceneName, &token, SAN_MIGUEL_ORIGINAL_SCALE, SAN_MIGUEL_ORIGINAL_OFFSETX, 0.0f, 0.0f);
 		waitForToken(&token);
 
 		gMeshCount = pScene->geom->mDrawArgCount;
 		gMaterialCount = pScene->geom->mDrawArgCount;
-		pMeshes = (ClusterContainer*)conf_malloc(gMeshCount * sizeof(ClusterContainer));
+		pMeshes = (ClusterContainer*)tf_malloc(gMeshCount * sizeof(ClusterContainer));
 		pGeom = pScene->geom;
 		
 		gDiffuseMaps.resize(gMaterialCount);
@@ -5360,18 +5326,19 @@ class LightShadowPlayground: public IApp
 		for (uint32_t i = 0; i < (uint32_t)gDiffuseMaps.size(); ++i)
 		{
 			TextureLoadDesc desc = {};
-			desc.pFilePath = fsGetPathInResourceDirEnum(RD_TEXTURES, pScene->textures[i]);
+			desc.pFileName = pScene->textures[i];
 			desc.ppTexture = &gDiffuseMaps[i];
-			addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
-			fsFreePath((Path*)desc.pFilePath);
-			desc.pFilePath = fsGetPathInResourceDirEnum(RD_TEXTURES, pScene->normalMaps[i]);
-			desc.ppTexture = &gNormalMaps[i];
-			addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
-			fsFreePath((Path*)desc.pFilePath);
-			desc.pFilePath = fsGetPathInResourceDirEnum(RD_TEXTURES, pScene->specularMaps[i]);
-			desc.ppTexture = &gSpecularMaps[i];
-			addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
-			fsFreePath((Path*)desc.pFilePath);
+			addResource(&desc, NULL);
+
+			TextureLoadDesc descNormal = {};
+			descNormal.pFileName = pScene->normalMaps[i];
+			descNormal.ppTexture = &gNormalMaps[i];
+			addResource(&descNormal, NULL);
+
+			TextureLoadDesc descSpec = {};
+			descSpec.pFileName = pScene->specularMaps[i];
+			descSpec.ppTexture = &gSpecularMaps[i];
+			addResource(&descSpec, NULL);
 		}
 		// Cluster creation
 		/************************************************************************/
@@ -5384,10 +5351,10 @@ class LightShadowPlayground: public IApp
 			createClusters(material->twoSided, pScene, pScene->geom->pDrawArgs + i, subMesh);
 		}
 
-		conf_free(pScene->geom->pShadow);
+		tf_free(pScene->geom->pShadow);
 
 		MeshConstants* meshConstants =
-			(MeshConstants*)conf_malloc(gMeshCount * sizeof(MeshConstants));
+			(MeshConstants*)tf_malloc(gMeshCount * sizeof(MeshConstants));
 
 
 		for (uint32_t i = 0; i < gMeshCount; ++i)
@@ -5407,10 +5374,10 @@ class LightShadowPlayground: public IApp
 		meshConstantDesc.mDesc.mSize = meshConstantDesc.mDesc.mElementCount * meshConstantDesc.mDesc.mStructStride;
 		meshConstantDesc.ppBuffer = &pBufferMeshConstants;
 		meshConstantDesc.pData = meshConstants;
-		meshConstantDesc.mDesc.pDebugName = L"Mesh Constant desc";
-		addResource(&meshConstantDesc, NULL, LOAD_PRIORITY_NORMAL);
+		meshConstantDesc.mDesc.pName = "Mesh Constant desc";
+		addResource(&meshConstantDesc, NULL);
 
-		conf_free(meshConstants);
+		tf_free(meshConstants);
 
 
 		
@@ -5598,20 +5565,16 @@ class LightShadowPlayground: public IApp
 #if defined(DIRECT3D12)
 		IndirectArgumentDescriptor indirectArgs[2] = {};
 		indirectArgs[0].mType = INDIRECT_CONSTANT;
-		indirectArgs[0].mCount = 1;
 		indirectArgs[0].pName = "indirectRootConstant";
 		indirectArgs[1].mType = INDIRECT_DRAW_INDEX;
-		CommandSignatureDesc vbPassDesc = { pCmdPool, pRootSignatureVBPass, 2, indirectArgs };
+		CommandSignatureDesc vbPassDesc = { pRootSignatureVBPass, 2, indirectArgs };
 		addIndirectCommandSignature(pRenderer, &vbPassDesc, &pCmdSignatureVBPass);
 #else
 		// Indicate the renderer that we want to use non-indexed geometry.
 		IndirectArgumentDescriptor indirectArgs[1] = {};
-
 		indirectArgs[0].mType = INDIRECT_DRAW_INDEX;
-
-		CommandSignatureDesc vbPassDesc = { pCmdPool, pRootSignatureVBPass, 1, indirectArgs };	
+		CommandSignatureDesc vbPassDesc = { pRootSignatureVBPass, 1, indirectArgs };
 		addIndirectCommandSignature(pRenderer, &vbPassDesc, &pCmdSignatureVBPass);
-		
 #endif
 		/************************************************************************/
 		/************************************************************************/
@@ -5619,9 +5582,9 @@ class LightShadowPlayground: public IApp
 		waitForAllResourceLoads();
 
 
-		gDiffuseMapsStorage = (Texture*)conf_malloc(sizeof(Texture) * gDiffuseMaps.size());
-		gNormalMapsStorage = (Texture*)conf_malloc(sizeof(Texture) * gNormalMaps.size());
-		gSpecularMapsStorage = (Texture*)conf_malloc(sizeof(Texture) * gSpecularMaps.size());
+		gDiffuseMapsStorage = (Texture*)tf_malloc(sizeof(Texture) * gDiffuseMaps.size());
+		gNormalMapsStorage = (Texture*)tf_malloc(sizeof(Texture) * gNormalMaps.size());
+		gSpecularMapsStorage = (Texture*)tf_malloc(sizeof(Texture) * gSpecularMaps.size());
 
 		for (uint32_t i = 0; i < (uint32_t)gDiffuseMaps.size(); ++i)
 		{
@@ -5641,7 +5604,7 @@ class LightShadowPlayground: public IApp
 		/************************************************************************/
 		// Indirect data for the scene
 		/************************************************************************/
-		uint32_t* materialAlphaData = (uint32_t*)conf_malloc(
+		uint32_t* materialAlphaData = (uint32_t*)tf_malloc(
 			gMaterialCount * sizeof(uint32_t));
 
 		for (uint32_t i = 0; i < gMaterialCount; ++i)
@@ -5658,10 +5621,10 @@ class LightShadowPlayground: public IApp
 			materialPropDesc.mDesc.mStructStride;
 		materialPropDesc.pData = materialAlphaData;
 		materialPropDesc.ppBuffer = &pBufferMaterialProperty;
-		materialPropDesc.mDesc.pDebugName = L"Material Prop Desc";
-		addResource(&materialPropDesc, NULL, LOAD_PRIORITY_NORMAL);
+		materialPropDesc.mDesc.pName = "Material Prop Desc";
+		addResource(&materialPropDesc, NULL);
 
-		conf_free(materialAlphaData);
+		tf_free(materialAlphaData);
 
 
 		const uint32_t numBatches = (const uint32_t)gMeshCount;
@@ -5697,7 +5660,8 @@ class LightShadowPlayground: public IApp
 		filterIbDesc.mDesc.mElementCount = pGeom->mIndexCount;
 		filterIbDesc.mDesc.mStructStride = sizeof(uint32_t);
 		filterIbDesc.mDesc.mSize = filterIbDesc.mDesc.mElementCount * filterIbDesc.mDesc.mStructStride;
-		filterIbDesc.mDesc.pDebugName = L"Filtered IB Desc";
+		filterIbDesc.mDesc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
+		filterIbDesc.mDesc.pName = "Filtered IB Desc";
 		filterIbDesc.pData = NULL;
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
@@ -5705,12 +5669,12 @@ class LightShadowPlayground: public IApp
 			for (uint32_t j = 0; j < NUM_CULLING_VIEWPORTS; ++j)
 			{
 				filterIbDesc.ppBuffer = &pBufferFilteredIndex[i][j];
-				addResource(&filterIbDesc, NULL, LOAD_PRIORITY_NORMAL);
+				addResource(&filterIbDesc, NULL);
 			}
 		}
 
 		BufferIndirectCommand* indirectDrawArguments = (BufferIndirectCommand*)
-			conf_malloc(MAX_DRAWS_INDIRECT * sizeof(BufferIndirectCommand));
+			tf_malloc(MAX_DRAWS_INDIRECT * sizeof(BufferIndirectCommand));
 
 		memset(indirectDrawArguments, 0, MAX_DRAWS_INDIRECT * sizeof(BufferIndirectCommand));
 
@@ -5718,7 +5682,7 @@ class LightShadowPlayground: public IApp
 		{
 #if defined(DIRECT3D12)
 			indirectDrawArguments[i].drawId = i;
-#elif defined(ORBIS)
+#elif defined(ORBIS) || defined(PROSPERO)
 			indirectDrawArguments[i].arg.mStartInstance = i;
 #endif
 			if (i < gMeshCount)
@@ -5733,7 +5697,8 @@ class LightShadowPlayground: public IApp
 		filterIndirectDesc.mDesc.mElementCount = MAX_DRAWS_INDIRECT * (sizeof(BufferIndirectCommand) / sizeof(uint32_t));
 		filterIndirectDesc.mDesc.mStructStride = sizeof(uint32_t);
 		filterIndirectDesc.mDesc.mSize = filterIndirectDesc.mDesc.mElementCount * filterIndirectDesc.mDesc.mStructStride;
-		filterIndirectDesc.mDesc.pDebugName = L"Filtered Indirect Desc";
+		filterIndirectDesc.mDesc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
+		filterIndirectDesc.mDesc.pName = "Filtered Indirect Desc";
 		filterIndirectDesc.pData = indirectDrawArguments;
 
 		BufferLoadDesc uncompactedDesc = {};
@@ -5742,7 +5707,8 @@ class LightShadowPlayground: public IApp
 		uncompactedDesc.mDesc.mElementCount = MAX_DRAWS_INDIRECT;
 		uncompactedDesc.mDesc.mStructStride = sizeof(UncompactedDrawArguments);
 		uncompactedDesc.mDesc.mSize = uncompactedDesc.mDesc.mElementCount * uncompactedDesc.mDesc.mStructStride;
-		uncompactedDesc.mDesc.pDebugName = L"Uncompacted Draw Arguments Desc";
+		uncompactedDesc.mDesc.mStartState = RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		uncompactedDesc.mDesc.pName = "Uncompacted Draw Arguments Desc";
 		uncompactedDesc.pData = NULL;
 
 		BufferLoadDesc filterMaterialDesc = {};
@@ -5750,30 +5716,31 @@ class LightShadowPlayground: public IApp
 		filterMaterialDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
 		filterMaterialDesc.mDesc.mElementCount = MATERIAL_BUFFER_SIZE;
 		filterMaterialDesc.mDesc.mStructStride = sizeof(uint32_t);
-		filterMaterialDesc.mDesc.mSize = filterMaterialDesc.mDesc.mElementCount 
+		filterMaterialDesc.mDesc.mSize = filterMaterialDesc.mDesc.mElementCount
 			* filterMaterialDesc.mDesc.mStructStride;
-		filterMaterialDesc.mDesc.pDebugName = L"Filtered Indirect Material Desc";
+		filterMaterialDesc.mDesc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
+		filterMaterialDesc.mDesc.pName = "Filtered Indirect Material Desc";
 		filterMaterialDesc.pData = NULL;
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			filterMaterialDesc.ppBuffer = &pBufferFilterIndirectMaterial[i];
-			addResource(&filterMaterialDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&filterMaterialDesc, NULL);
 
 			for (uint32_t view = 0; view < NUM_CULLING_VIEWPORTS; ++view)
 			{
 				uncompactedDesc.ppBuffer = &pBufferUncompactedDrawArguments[i][view];
-				addResource(&uncompactedDesc, NULL, LOAD_PRIORITY_NORMAL);
+				addResource(&uncompactedDesc, NULL);
 
 				for (uint32_t geom = 0; geom < gNumGeomSets; ++geom)
 				{
 					filterIndirectDesc.ppBuffer = &pBufferFilteredIndirectDrawArguments[i][geom][view];
-					addResource(&filterIndirectDesc, NULL, LOAD_PRIORITY_NORMAL);
+					addResource(&filterIndirectDesc, NULL);
 				}
 			}
 		}
 
-		conf_free(indirectDrawArguments);
+		tf_free(indirectDrawArguments);
 
 		/************************************************************************/
 		// Triangle filtering buffers
@@ -5788,7 +5755,7 @@ class LightShadowPlayground: public IApp
 			{
 				const uint32_t bufferSize = BATCH_COUNT * sizeof(FilterBatchData);
 				bufferSizeTotal += bufferSize;
-				pFilterBatchChunk[i][j] = (FilterBatchChunk*)conf_malloc(sizeof(FilterBatchChunk));
+				pFilterBatchChunk[i][j] = (FilterBatchChunk*)tf_malloc(sizeof(FilterBatchChunk));
 				pFilterBatchChunk[i][j]->currentBatchCount = 0;
 				pFilterBatchChunk[i][j]->currentDrawCallCount = 0;
 			}
@@ -5814,9 +5781,9 @@ class LightShadowPlayground: public IApp
 		/************************************************************************/
 		// Initialize ASM's render data
 		/************************************************************************/
-		pASM = conf_new(ASM);
+		pASM = tf_new(ASM);
 
-		pSDFVolumeTextureAtlas = conf_new
+		pSDFVolumeTextureAtlas = tf_new
 			(SDFVolumeTextureAtlas,
 			ivec3(
 				SDF_VOLUME_TEXTURE_ATLAS_WIDTH,
@@ -5842,7 +5809,7 @@ class LightShadowPlayground: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			sdfMeshVolumeDataUniformDesc.ppBuffer = &pBufferSDFVolumeData[i];
-			addResource(&sdfMeshVolumeDataUniformDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&sdfMeshVolumeDataUniformDesc, NULL);
 		}
 		/************************************************************************/
 		// SDF volume atlas Texture
@@ -5858,32 +5825,28 @@ class LightShadowPlayground: public IApp
 		sdfVolumeTextureAtlasDesc.mMipLevels = 1;
 		sdfVolumeTextureAtlasDesc.mSampleCount = SAMPLE_COUNT_1;
 		sdfVolumeTextureAtlasDesc.mSampleQuality = 0;
-		sdfVolumeTextureAtlasDesc.pDebugName = L"SDF Volume Texture Atlas";
-		sdfVolumeTextureAtlasDesc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
-		//sdfVolumeTextureAtlasDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
+		sdfVolumeTextureAtlasDesc.pName = "SDF Volume Texture Atlas";
+		sdfVolumeTextureAtlasDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 
 		TextureLoadDesc sdfVolumeTextureAtlasLoadDesc = {};
 		sdfVolumeTextureAtlasLoadDesc.pDesc = &sdfVolumeTextureAtlasDesc;
 		sdfVolumeTextureAtlasLoadDesc.ppTexture = &pTextureSDFVolumeAtlas;
-		addResource(&sdfVolumeTextureAtlasLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&sdfVolumeTextureAtlasLoadDesc, NULL);
 		/*************************************************/
 		//					UI
 		/*************************************************/
 
 		calculateCurSDFMeshesProgress();
-
-		float   dpiScale = getDpiScale().x;
-
+				
 		GuiDesc guiDesc2 = {};
-		guiDesc2.mStartPosition = vec2(700.0f / dpiScale, 450.0f / dpiScale);
+		guiDesc2.mStartPosition = vec2(mSettings.mWidth * 0.15f, mSettings.mHeight * 0.4f);
 		pLoadingGui = gAppUI.AddGuiComponent("Generating SDF", &guiDesc2);
 		ProgressBarWidget ProgressBar("               [ProgressBar]               ", &gSDFProgressValue, LightShadowPlayground::getMaxSDFMeshesProgress());
 		pLoadingGui->AddWidget(ProgressBar);
 
 		GuiDesc guiDesc = {};
 		
-		guiDesc.mStartPosition = vec2((float)mSettings.mWidth - 450, 0.0f) / dpiScale;
-		guiDesc.mStartSize = vec2(450, 600) / dpiScale;
+		guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.4f);
 		pGuiWindow = gAppUI.AddGuiComponent(GetName(), &guiDesc);
 		GuiController::addGui();
 
@@ -5965,25 +5928,23 @@ class LightShadowPlayground: public IApp
 		skyboxImgDesc.mMipLevels = gSkyboxMips;
 		skyboxImgDesc.mSampleCount = SAMPLE_COUNT_1;
 		skyboxImgDesc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
-		skyboxImgDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
 		skyboxImgDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE_CUBE | DESCRIPTOR_TYPE_RW_TEXTURE;
-		skyboxImgDesc.pDebugName = L"skyboxImgBuff";
+		skyboxImgDesc.pName = "skyboxImgBuff";
 
 		TextureLoadDesc skyboxLoadDesc = {};
 		skyboxLoadDesc.pDesc = &skyboxImgDesc;
 		skyboxLoadDesc.ppTexture = &pTextureSkybox;
-		addResource(&skyboxLoadDesc, &token, LOAD_PRIORITY_HIGH);
+		addResource(&skyboxLoadDesc, &token);
 
 		// Load the skybox panorama texture.
-		PathHandle panoTexturePath = fsGetPathInResourceDirEnum(RD_TEXTURES, "daytime");
 		TextureLoadDesc panoDesc = {};
-		panoDesc.pFilePath = panoTexturePath;
+		panoDesc.pFileName = "daytime";
 		panoDesc.ppTexture = &pPanoSkybox;
-		addResource(&panoDesc, &token, LOAD_PRIORITY_HIGH);
+		addResource(&panoDesc, &token);
 
 		// Load pre-processing shaders.
 		ShaderLoadDesc panoToCubeShaderDesc = {};
-		panoToCubeShaderDesc.mStages[0] = { "panoToCube.comp", NULL, 0, RD_SHADER_SOURCES };
+		panoToCubeShaderDesc.mStages[0] = { "panoToCube.comp", NULL, 0 };
 
 		addShader(pRenderer, &panoToCubeShaderDesc, &pPanoToCubeShader);
 
@@ -6010,13 +5971,10 @@ class LightShadowPlayground: public IApp
 		waitForToken(&token);
 
 		// Since this happens on iniatilization, use the first cmd/fence pair available.
-		Cmd* cmd = ppCmds[0];
+		Cmd* cmd = pCmds[0];
 
 		// Compute the BRDF Integration map.
 		beginCmd(cmd);
-
-		TextureBarrier uavBarriers[1] = { { pTextureSkybox, RESOURCE_STATE_UNORDERED_ACCESS } };
-		cmdResourceBarrier(cmd, 0, NULL, 1, uavBarriers, 0, NULL);
 
 		DescriptorData params[1] = {};
 
@@ -6050,7 +6008,7 @@ class LightShadowPlayground: public IApp
 				max(1u, (uint32_t)(data.textureSize >> i) / pThreadGroupSize[1]), 6);
 		}
 
-		TextureBarrier srvBarriers[1] = { { pTextureSkybox, RESOURCE_STATE_SHADER_RESOURCE } };
+		TextureBarrier srvBarriers[1] = { { pTextureSkybox, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_SHADER_RESOURCE } };
 		cmdResourceBarrier(cmd, 0, NULL, 1, srvBarriers, 0, NULL);
 		/************************************************************************/
 		/************************************************************************/
@@ -6077,8 +6035,8 @@ class LightShadowPlayground: public IApp
 		removeSampler(pRenderer, pSkyboxSampler);
 
 		ShaderLoadDesc skyboxShaderDesc = {};
-		skyboxShaderDesc.mStages[0] = { "skybox.vert", NULL, 0, RD_SHADER_SOURCES };
-		skyboxShaderDesc.mStages[1] = { "skybox.frag", NULL, 0, RD_SHADER_SOURCES };
+		skyboxShaderDesc.mStages[0] = { "skybox.vert", NULL, 0 };
+		skyboxShaderDesc.mStages[1] = { "skybox.frag", NULL, 0 };
 
 		addShader(pRenderer, &skyboxShaderDesc, &pShaderSkybox);
 
@@ -6122,9 +6080,9 @@ class LightShadowPlayground: public IApp
 		skyboxVbDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
 		skyboxVbDesc.mDesc.mSize = skyBoxDataSize;
 		skyboxVbDesc.pData = skyBoxPoints;
-		skyboxVbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_OWN_MEMORY_BIT | BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
+		skyboxVbDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
 		skyboxVbDesc.ppBuffer = &pBufferSkyboxVertex;
-		addResource(&skyboxVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&skyboxVbDesc, NULL);
 
 		BufferLoadDesc skyboxUBDesc = {};
 		skyboxUBDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -6134,62 +6092,9 @@ class LightShadowPlayground: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			skyboxUBDesc.ppBuffer = &pBufferSkyboxUniform[i];
-			addResource(&skyboxUBDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&skyboxUBDesc, NULL);
 		}
 	}
-	//
-	void setResourcesToComputeCompliantState(uint32_t frameIdx, bool submitAndWait)
-	{
-		if (submitAndWait)
-		{
-			beginCmd(ppCmds[frameIdx]);
-		}
-		
-		BufferBarrier barrier[] = { { pGeom->pVertexBuffers[0], RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE },
-			{ pGeom->pIndexBuffer, RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE },
-			{ pBufferMeshConstants, RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE },
-			{ pBufferMaterialProperty, RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE },
-			{ pBufferFilterIndirectMaterial[frameIdx], RESOURCE_STATE_UNORDERED_ACCESS },
-			{ pBufferUncompactedDrawArguments[frameIdx][VIEW_SHADOW], RESOURCE_STATE_UNORDERED_ACCESS },
-			{ pBufferUncompactedDrawArguments[frameIdx][VIEW_CAMERA], RESOURCE_STATE_UNORDERED_ACCESS }
-		};
-		cmdResourceBarrier(ppCmds[frameIdx], 7, barrier, 0, NULL, 0, NULL);
-
-		BufferBarrier indirectDrawBarriers[gNumGeomSets * NUM_CULLING_VIEWPORTS] = {};
-		for (uint32_t i = 0, k = 0; i < gNumGeomSets; i++)
-		{
-			for (uint32_t j = 0; j < NUM_CULLING_VIEWPORTS; j++, k++)
-			{
-				indirectDrawBarriers[k].pBuffer = 
-					pBufferFilteredIndirectDrawArguments[frameIdx][i][j];
-				indirectDrawBarriers[k].mNewState = RESOURCE_STATE_UNORDERED_ACCESS;
-				indirectDrawBarriers[k].mSplit = false;
-			}
-		}
-		cmdResourceBarrier(ppCmds[frameIdx], gNumGeomSets * NUM_CULLING_VIEWPORTS, indirectDrawBarriers, 0, NULL, 0, NULL);
-
-		BufferBarrier filteredIndicesBarriers[NUM_CULLING_VIEWPORTS] = {};
-		for (uint32_t j = 0; j < NUM_CULLING_VIEWPORTS; j++)
-		{
-			filteredIndicesBarriers[j].pBuffer = pBufferFilteredIndex[frameIdx][j];
-			filteredIndicesBarriers[j].mNewState = RESOURCE_STATE_UNORDERED_ACCESS;
-			filteredIndicesBarriers[j].mSplit = false;
-		}
-		cmdResourceBarrier(ppCmds[frameIdx], NUM_CULLING_VIEWPORTS, filteredIndicesBarriers, 0, NULL, 0, NULL);
-
-		if (submitAndWait)
-		{
-			endCmd(ppCmds[frameIdx]);
-			QueueSubmitDesc submitDesc = {};
-			submitDesc.mCmdCount = 1;
-			submitDesc.ppCmds = &ppCmds[frameIdx];
-			submitDesc.pSignalFence = pTransitionFences;
-			submitDesc.mSubmitDone = true;
-			queueSubmit(pGraphicsQueue, &submitDesc);
-			waitForFences(pRenderer, 1, &pTransitionFences);
-		}
-	}
-
 
 	void RemoveRenderTargetsAndSwapChain()
 	{
@@ -6203,26 +6108,26 @@ class LightShadowPlayground: public IApp
 			removeRenderTarget(pRenderer, pRenderTargetASMIndirection[i]);
 			removeRenderTarget(pRenderer, pRenderTargetASMPrerenderIndirection[i]);
 		}
+
 		removeRenderTarget(pRenderer, pRenderTargetASMLodClamp);
 		removeRenderTarget(pRenderer, pRenderTargetASMPrerenderLodClamp);
-
 
 		removeRenderTarget(pRenderer, pRenderTargetVBPass);
 
 		removeRenderTarget(pRenderer, pRenderTargetDepth);
 		removeRenderTarget(pRenderer, pRenderTargetShadowMap);
 
+		removeResource(pTextureSDFMeshShadow);
 		removeRenderTarget(pRenderer, pRenderTargetSDFMeshVisualization);
-		removeResource(pRenderTargetSDFMeshShadow);
 		removeRenderTarget(pRenderer, pRenderTargetUpSampleSDFShadow);
 
 		removeSwapChain(pRenderer, pSwapChain);
-
-
-		
 	}
+
 	void Exit() override
 	{
+		shouldExitSDFGeneration = true;
+
 		exitInputSystem();
 		shutdownThreadSystem(pThreadSystem);
 
@@ -6238,12 +6143,12 @@ class LightShadowPlayground: public IApp
 
 		removeResource(pGeom);
 
-		conf_delete(pASM);
-		conf_delete(pSDFVolumeTextureAtlas);
+		tf_delete(pASM);
+		tf_delete(pSDFVolumeTextureAtlas);
 
-		conf_free(gDiffuseMapsStorage);
-		conf_free(gNormalMapsStorage);
-		conf_free(gSpecularMapsStorage);
+		tf_free(gDiffuseMapsStorage);
+		tf_free(gNormalMapsStorage);
+		tf_free(gSpecularMapsStorage);
 
 		if (pTextureSDFVolumeAtlas)
 		{
@@ -6336,7 +6241,7 @@ class LightShadowPlayground: public IApp
 		{
 			for (uint32_t j = 0; j < gSmallBatchChunkCount; ++j)
 			{
-				conf_free(pFilterBatchChunk[i][j]);
+				tf_free(pFilterBatchChunk[i][j]);
 			}
 		}
 
@@ -6346,13 +6251,13 @@ class LightShadowPlayground: public IApp
 		{
 			destroyClusters(&pMeshes[i]);
 		}
-		conf_free(pMeshes);
+		tf_free(pMeshes);
 
 		for (uint32_t i = 0; i < (uint32_t)gSDFVolumeInstances.size(); ++i)
 		{
 			if (gSDFVolumeInstances[i])
 			{
-				conf_delete(gSDFVolumeInstances[i]);
+				tf_delete(gSDFVolumeInstances[i]);
 			}
 		}
 		
@@ -6380,7 +6285,7 @@ class LightShadowPlayground: public IApp
 		removeShader(pRenderer, pShaderIndirectAlphaDepthPass);
 
 		removeShader(pRenderer, pShaderASMFillIndirection);
-#if defined(ORBIS)
+#if defined(ORBIS) || defined(PROSPERO)
 		removeShader(pRenderer, pShaderASMFillIndirectionFP16);
 #endif
 		removeShader(pRenderer, pShaderASMGenerateDEM);
@@ -6434,8 +6339,11 @@ class LightShadowPlayground: public IApp
 		removeFence(pRenderer, pTransitionFences);
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
 
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
 
         exitResourceLoaderInterface(pRenderer);
 		removeQueue(pRenderer, pGraphicsQueue);
@@ -6652,24 +6560,22 @@ class LightShadowPlayground: public IApp
 
 			vbPassPipelineSettings.pShaderProgram = pShaderVBBufferPass[i];
 
-#if defined(_DURANGO)
+#if defined(XBOX)
 			ExtendedGraphicsPipelineDesc edescs[2] = {};
-
 			edescs[0].type = EXTENDED_GRAPHICS_PIPELINE_TYPE_SHADER_LIMITS;
 			initExtendedGraphicsShaderLimits(&edescs[0].shaderLimitsDesc);
 			edescs[0].shaderLimitsDesc.maxWavesWithLateAllocParameterCache = 16;
 
 			edescs[1].type = EXTENDED_GRAPHICS_PIPELINE_TYPE_DEPTH_STENCIL_OPTIONS;
 			edescs[1].pixelShaderOptions.outOfOrderRasterization = PIXEL_SHADER_OPTION_OUT_OF_ORDER_RASTERIZATION_ENABLE_WATER_MARK_7;
+			edescs[1].pixelShaderOptions.depthBeforeShader = !i ? PIXEL_SHADER_OPTION_DEPTH_BEFORE_SHADER_ENABLE : PIXEL_SHADER_OPTION_DEPTH_BEFORE_SHADER_DEFAULT;
 
-			if (i == 0)
-				edescs[1].pixelShaderOptions.depthBeforeShader = PIXEL_SHADER_OPTION_DEPTH_BEFORE_SHADER_ENABLE;
-
-			addPipelineExt(pRenderer, &vbPassPipelineSettings, _countof(edescs), edescs, &pPipelineVBBufferPass[i]);
-#else
-			addPipeline(pRenderer, &desc, &pPipelineVBBufferPass[i]);
+			desc.mExtensionCount = 2;
+			desc.pPipelineExtensions = edescs;
 #endif
+			addPipeline(pRenderer, &desc, &pPipelineVBBufferPass[i]);
 
+			desc.mExtensionCount = 0;
 		}
 		desc.mGraphicsDesc = {};
 		GraphicsPipelineDesc& vbShadePipelineSettings = desc.mGraphicsDesc;
@@ -6683,22 +6589,21 @@ class LightShadowPlayground: public IApp
 		vbShadePipelineSettings.pColorFormats = &pRenderTargetIntermediate->mFormat;
 		vbShadePipelineSettings.mSampleQuality = pSwapChain->ppRenderTargets[0]->mSampleQuality;
 
-#if defined(_DURANGO) && 1
-		ExtendedGraphicsPipelineDesc edescs[2];
-		memset(edescs, 0, sizeof(edescs));
-
+#if defined(XBOX)
+		ExtendedGraphicsPipelineDesc edescs[2] = {};
 		edescs[0].type = EXTENDED_GRAPHICS_PIPELINE_TYPE_SHADER_LIMITS;
 		initExtendedGraphicsShaderLimits(&edescs[0].shaderLimitsDesc);
 		//edescs[0].ShaderLimitsDesc.MaxWavesWithLateAllocParameterCache = 22;
 
 		edescs[1].type = EXTENDED_GRAPHICS_PIPELINE_TYPE_DEPTH_STENCIL_OPTIONS;
 		edescs[1].pixelShaderOptions.outOfOrderRasterization = PIXEL_SHADER_OPTION_OUT_OF_ORDER_RASTERIZATION_ENABLE_WATER_MARK_7;
-
 		edescs[1].pixelShaderOptions.depthBeforeShader = PIXEL_SHADER_OPTION_DEPTH_BEFORE_SHADER_ENABLE;
-		addPipelineExt(pRenderer, &vbShadePipelineSettings, _countof(edescs), edescs, &pPipelineVBShadeSrgb);
-#else
-		addPipeline(pRenderer, &desc, &pPipelineVBShadeSrgb);
+
+		desc.mExtensionCount = 2;
+		desc.pPipelineExtensions = edescs;
 #endif
+		addPipeline(pRenderer, &desc, &pPipelineVBShadeSrgb);
+		desc.mExtensionCount = 0;
 		desc.mGraphicsDesc = {};
 		
 		desc.mType = PIPELINE_TYPE_COMPUTE;
@@ -6708,9 +6613,6 @@ class LightShadowPlayground: public IApp
 		clearBufferPipelineSettings.pShaderProgram = pShaderClearBuffers;
 		clearBufferPipelineSettings.pRootSignature = pRootSignatureTriangleFiltering;
 		addPipeline(pRenderer, &desc, &pPipelineClearBuffers);
-
-
-
 
 		desc.mComputeDesc = {};
 		ComputePipelineDesc& triangleFilteringPipelineSettings = desc.mComputeDesc;
@@ -6923,17 +6825,13 @@ class LightShadowPlayground: public IApp
 		ASMFillLodClampPipelineDesc.mSampleCount = pRenderTargetASMLodClamp->mSampleCount;
 		ASMFillLodClampPipelineDesc.mSampleQuality = pRenderTargetASMLodClamp->mSampleQuality;
 		ASMFillLodClampPipelineDesc.pRootSignature = pRootSignatureASMFillLodClamp;
-#if defined(ORBIS)
+#if defined(ORBIS) || defined(PROSPERO)
 		ASMFillLodClampPipelineDesc.pShaderProgram = pShaderASMFillIndirectionFP16;
 #else
 		ASMFillLodClampPipelineDesc.pShaderProgram = pShaderASMFillIndirection;
 #endif
 		ASMFillLodClampPipelineDesc.pRasterizerState = &rasterStateCullNoneDesc;
 		addPipeline(pRenderer, &desc, &pPipelineASMFillLodClamp);
-
-		VertexLayout vertexLayoutCopyShaders = {};
-		vertexLayoutCopyShaders.mAttribCount = 0;
-
 		/************************************************************************/
 		// Setup Present pipeline
 		/************************************************************************/
@@ -6945,7 +6843,6 @@ class LightShadowPlayground: public IApp
 		pipelineSettingsFinalPass.pColorFormats = &pSwapChain->ppRenderTargets[0]->mFormat;
 		pipelineSettingsFinalPass.mSampleCount = pSwapChain->ppRenderTargets[0]->mSampleCount;
 		pipelineSettingsFinalPass.mSampleQuality = pSwapChain->ppRenderTargets[0]->mSampleQuality;
-		pipelineSettingsFinalPass.pVertexLayout = &vertexLayoutCopyShaders;
 		pipelineSettingsFinalPass.pRootSignature = pRootSignaturePresentPass;
 		pipelineSettingsFinalPass.pShaderProgram = pShaderPresentPass;
 
@@ -7277,34 +7174,6 @@ class LightShadowPlayground: public IApp
 		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 	}
 
-	static void drawSkybox(Cmd* cmd)
-	{
-		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw Skybox");
-
-		BufferUpdateDesc updateDesc = { pBufferSkyboxUniform[gFrameIndex] };
-		beginUpdateResource(&updateDesc);
-		*(UniformDataSkybox*)updateDesc.pMappedData = gUniformDataSky;
-		endUpdateResource(&updateDesc, NULL);
-
-		// Transfer our render target to a render target state
-		RenderTargetBarrier barrier[] = { { pRenderTargetScreen, RESOURCE_STATE_RENDER_TARGET } };
-		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barrier);
-
-		setRenderTarget(cmd, 1, &pRenderTargetScreen, NULL, NULL);
-
-		// Draw the skybox
-		const uint32_t skyboxStride = sizeof(float) * 4;
-		cmdBindPipeline(cmd, pPipelineSkybox);
-		cmdBindDescriptorSet(cmd, 0, pDescriptorSetSkybox[0]);
-		cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetSkybox[1]);
-		cmdBindVertexBuffer(cmd, 1, &pBufferSkyboxVertex, &skyboxStride, NULL);
-		cmdDraw(cmd, 36, 0);
-
-		cmdBindRenderTargets(cmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
-
-		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
-	}
-
 	static void drawSDFVolumeTextureAtlas(Cmd* cmd, SDFVolumeTextureNode* node)
 	{
 		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw update texture atlas");
@@ -7324,9 +7193,6 @@ class LightShadowPlayground: public IApp
 		beginUpdateResource(&meshSDFConstantUpdate);
 		*(UpdateSDFVolumeTextureAtlasConstants*)meshSDFConstantUpdate.pMappedData = gUpdateSDFVolumeTextureAtlasConstants;
 		endUpdateResource(&meshSDFConstantUpdate, NULL);
-	
-		TextureBarrier textureBarriers[] = { { pTextureSDFVolumeAtlas, RESOURCE_STATE_UNORDERED_ACCESS } };
-		cmdResourceBarrier(cmd, 0, NULL, 1, textureBarriers, 0, NULL);
 
 		cmdBindPipeline(cmd, pPipelineUpdateSDFVolumeTextureAtlas);
 		cmdBindDescriptorSet(cmd, 0, pDescriptorSetUpdateSDFVolumeTextureAtlas[0]);
@@ -7345,25 +7211,6 @@ class LightShadowPlayground: public IApp
 	void drawSDFMeshVisualizationOnScene(Cmd* cmd)
 	{
 		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Visualize SDF Geometry On The Scene");
-		RenderTargetBarrier rtBarriers[] = 
-		{ 
-			{
-				pRenderTargetSDFMeshVisualization,
-				RESOURCE_STATE_UNORDERED_ACCESS
-			},
-			{
-				pRenderTargetDepth,
-				RESOURCE_STATE_SHADER_RESOURCE
-			}
-		};
-		TextureBarrier textureBarriers[] =
-		{
-			{
-				pTextureSDFVolumeAtlas,
-				RESOURCE_STATE_SHADER_RESOURCE
-			},
-		};
-		cmdResourceBarrier(cmd, 0, NULL, 1, textureBarriers, 2, rtBarriers);
 
 		cmdBindPipeline(cmd, pPipelineSDFMeshVisualization);
 		cmdBindDescriptorSet(cmd, 0, pDescriptorSetSDFMeshVisualization[0]);
@@ -7376,38 +7223,17 @@ class LightShadowPlayground: public IApp
 		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 	}
 
-
 	void drawSDFMeshShadow(Cmd* cmd)
 	{
 		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw SDF mesh shadow");
-		
-		RenderTargetBarrier rtBarriers[] =
-		{
-			{
-				pRenderTargetDepth,
-				RESOURCE_STATE_SHADER_RESOURCE
-			}
-		};
-		TextureBarrier textureBarriers[] =
-		{
-			{
-				pRenderTargetSDFMeshShadow,
-				RESOURCE_STATE_UNORDERED_ACCESS
-			},
-			{
-				pTextureSDFVolumeAtlas,
-				RESOURCE_STATE_SHADER_RESOURCE
-			},
-		};
-		cmdResourceBarrier(cmd, 0, NULL, 2, textureBarriers, 1, rtBarriers);
 
 		cmdBindPipeline(cmd, pPipelineSDFMeshShadow);
 		cmdBindDescriptorSet(cmd, 0, pDescriptorSetSDFMeshShadow[0]);
 		cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetSDFMeshShadow[1]);
 
 		cmdDispatch(cmd,
-			(uint32_t) ceil ((float)(pRenderTargetSDFMeshShadow->mWidth) / (float)(SDF_MESH_SHADOW_THREAD_X) ),
-			(uint32_t) ceil ((float)(pRenderTargetSDFMeshShadow->mHeight) / (float)(SDF_MESH_SHADOW_THREAD_Y) ),
+			(uint32_t)ceil((float)(pTextureSDFMeshShadow->mWidth) / (float)(SDF_MESH_SHADOW_THREAD_X) ),
+			(uint32_t)ceil((float)(pTextureSDFMeshShadow->mHeight) / (float)(SDF_MESH_SHADOW_THREAD_Y) ),
 			1);
 		
 
@@ -7420,23 +7246,13 @@ class LightShadowPlayground: public IApp
 		
 		RenderTargetBarrier rtBarriers[] =
 		{
-			{
-				pRenderTargetDepth,
-				RESOURCE_STATE_SHADER_RESOURCE
-			},
-			{
-				pRenderTargetUpSampleSDFShadow,
-				RESOURCE_STATE_RENDER_TARGET
-			}
+			{ pRenderTargetUpSampleSDFShadow, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET }
 		};
 		TextureBarrier textureBarriers[] =
 		{
-			{
-				pRenderTargetSDFMeshShadow,
-				RESOURCE_STATE_SHADER_RESOURCE
-			},
+			{ pTextureSDFMeshShadow, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_SHADER_RESOURCE },
 		};
-		cmdResourceBarrier(cmd, 0, NULL, 1, textureBarriers, 2, rtBarriers);
+		cmdResourceBarrier(cmd, 0, NULL, 1, textureBarriers, 1, rtBarriers);
 
 		LoadActionsDesc loadActions = {};
 		loadActions.mLoadActionDepth = LOAD_ACTION_DONTCARE;
@@ -7467,7 +7283,7 @@ class LightShadowPlayground: public IApp
 		/************************************************************************/
 		BufferBarrier uavBarriers[NUM_CULLING_VIEWPORTS] = {};
 		for (uint32_t i = 0; i < NUM_CULLING_VIEWPORTS; ++i)
-			uavBarriers[i] = { pBufferUncompactedDrawArguments[frameIdx][i], RESOURCE_STATE_UNORDERED_ACCESS };
+			uavBarriers[i] = { pBufferUncompactedDrawArguments[frameIdx][i], RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
 		cmdResourceBarrier(cmd, NUM_CULLING_VIEWPORTS, uavBarriers, 0, NULL, 0, NULL);
 		/************************************************************************/
 		// Clear previous indirect arguments
@@ -7488,9 +7304,9 @@ class LightShadowPlayground: public IApp
 		uint32_t index = 0;
 		for (uint32_t i = 0; i < NUM_CULLING_VIEWPORTS; ++i)
 		{
-			clearBarriers[index++] = { pBufferUncompactedDrawArguments[frameIdx][i], RESOURCE_STATE_UNORDERED_ACCESS };
-			clearBarriers[index++] = { pBufferFilteredIndirectDrawArguments[frameIdx][GEOMSET_ALPHATESTED][i], RESOURCE_STATE_UNORDERED_ACCESS };
-			clearBarriers[index++] = { pBufferFilteredIndirectDrawArguments[frameIdx][GEOMSET_OPAQUE][i], RESOURCE_STATE_UNORDERED_ACCESS };
+			clearBarriers[index++] = { pBufferUncompactedDrawArguments[frameIdx][i], RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_UNORDERED_ACCESS };
+			clearBarriers[index++] = { pBufferFilteredIndirectDrawArguments[frameIdx][GEOMSET_ALPHATESTED][i], RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_UNORDERED_ACCESS };
+			clearBarriers[index++] = { pBufferFilteredIndirectDrawArguments[frameIdx][GEOMSET_OPAQUE][i], RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_UNORDERED_ACCESS };
 		}
 		cmdResourceBarrier(cmd, numBarriers, clearBarriers, 0, NULL, 0, NULL);
 		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
@@ -7569,7 +7385,7 @@ class LightShadowPlayground: public IApp
 		// Synchronization
 		/************************************************************************/
 		for (uint32_t i = 0; i < NUM_CULLING_VIEWPORTS; ++i)
-			uavBarriers[i] = { pBufferUncompactedDrawArguments[frameIdx][i], RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE };
+			uavBarriers[i] = { pBufferUncompactedDrawArguments[frameIdx][i], RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE };
 		cmdResourceBarrier(cmd, NUM_CULLING_VIEWPORTS, uavBarriers, 0, NULL, 0, NULL);
 		/************************************************************************/
 		// Batch compaction
@@ -7637,11 +7453,8 @@ class LightShadowPlayground: public IApp
 
 	void drawVisibilityBufferPass(Cmd* cmd)
 	{
-		RenderTargetBarrier barriers[] = { 
-			{ pRenderTargetVBPass, RESOURCE_STATE_RENDER_TARGET },
-			{ pRenderTargetDepth, RESOURCE_STATE_DEPTH_WRITE} };
-
-		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
+		RenderTargetBarrier barriers[] = { { pRenderTargetVBPass, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET } };
+		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 
 		const char* profileNames[gNumGeomSets] = { "VB pass Opaque", "VB pass Alpha" };
 		LoadActionsDesc loadActions = {};
@@ -7706,37 +7519,26 @@ class LightShadowPlayground: public IApp
 		if (gCurrentShadowType == SHADOW_TYPE_ASM)
 			updateASMUniform();
 
-		RenderTarget* esmShadowMap = pRenderTargetShadowMap;
 		Buffer* pIndirectBuffers[gNumGeomSets] = { NULL };
 		for (uint32_t i = 0; i < gNumGeomSets; ++i)
 		{
 			pIndirectBuffers[i] = pBufferFilteredIndirectDrawArguments[frameIdx][i][VIEW_CAMERA];
 		}
 
-		BufferBarrier bufferBarriers[] =
-		{
-			{ pBufferMeshConstants, RESOURCE_STATE_SHADER_RESOURCE },
-			{ pGeom->pVertexBuffers[0], RESOURCE_STATE_SHADER_RESOURCE },
-			{ pIndirectBuffers[0], RESOURCE_STATE_SHADER_RESOURCE },
-			{ pIndirectBuffers[1], RESOURCE_STATE_SHADER_RESOURCE } ,
-			{ pBufferFilterIndirectMaterial[frameIdx], RESOURCE_STATE_SHADER_RESOURCE }
-		};
 #if ENABLE_SDF_SHADOW_DOWNSAMPLE
 		RenderTarget* sdfShadowTexture = pRenderTargetUpSampleSDFShadow;
 		RenderTargetBarrier rtBarriers[] = {
-			{ sdfShadowTexture, RESOURCE_STATE_SHADER_RESOURCE },
-			{ esmShadowMap, RESOURCE_STATE_SHADER_RESOURCE },
-			{ pRenderTargetVBPass, RESOURCE_STATE_SHADER_RESOURCE }
+			{ pRenderTargetVBPass, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE },
+			{ sdfShadowTexture, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE },
 		};
-		cmdResourceBarrier(cmd, 5, bufferBarriers, 0, NULL, 3, rtBarriers);
+		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, gCurrentShadowType == SHADOW_TYPE_MESH_BAKED_SDF ? 2 : 1, rtBarriers);
 #else
-		Texture* sdfShadowTexture = pRenderTargetSDFMeshShadow;
-		TextureBarrier textureBarriers[] = { { sdfShadowTexture, RESOURCE_STATE_SHADER_RESOURCE } };
+		Texture* sdfShadowTexture = pTextureSDFMeshShadow;
+		TextureBarrier textureBarriers[] = { { sdfShadowTexture, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_SHADER_RESOURCE } };
 		RenderTargetBarrier rtBarriers[] = {
-			{ esmShadowMap, RESOURCE_STATE_SHADER_RESOURCE },
-			{ pRenderTargetVBPass, RESOURCE_STATE_SHADER_RESOURCE }
+			{ pRenderTargetVBPass, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
 		};
-		cmdResourceBarrier(cmd, 5, bufferBarriers, 1, textureBarriers, 2, rtBarriers);
+		cmdResourceBarrier(cmd, 0, NULL, 1, textureBarriers, 1, rtBarriers);
 #endif
 
 		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "VB Shade Pass");
@@ -7757,7 +7559,24 @@ class LightShadowPlayground: public IApp
 
 		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 		
-		drawSkybox(cmd);
+		{
+			cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw Skybox");
+
+			BufferUpdateDesc updateDesc = { pBufferSkyboxUniform[gFrameIndex] };
+			beginUpdateResource(&updateDesc);
+			*(UniformDataSkybox*)updateDesc.pMappedData = gUniformDataSky;
+			endUpdateResource(&updateDesc, NULL);
+
+			// Draw the skybox
+			const uint32_t skyboxStride = sizeof(float) * 4;
+			cmdBindPipeline(cmd, pPipelineSkybox);
+			cmdBindDescriptorSet(cmd, 0, pDescriptorSetSkybox[0]);
+			cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetSkybox[1]);
+			cmdBindVertexBuffer(cmd, 1, &pBufferSkyboxVertex, &skyboxStride, NULL);
+			cmdDraw(cmd, 36, 0);
+
+			cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
+		}
 
 		cmdBindRenderTargets(cmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 	}
@@ -7810,7 +7629,7 @@ class LightShadowPlayground: public IApp
 			gVisibilityBufferConstants[gFrameIndex].mCullingViewports[VIEW_SHADOW].mSampleCount = 1;
 
 
-#if defined(DIRECT3D12) || defined(METAL) || defined(ORBIS)
+#if defined(DIRECT3D12) || defined(METAL) || defined(ORBIS) || defined(PROSPERO)
 			vec2 windowSize = vec2(gs_ASMDepthAtlasTextureWidth, gs_ASMDepthAtlasTextureHeight);
 			gVisibilityBufferConstants[gFrameIndex].mCullingViewports[VIEW_SHADOW].mWindowSize = v2ToF2(windowSize);
 #elif defined(VULKAN)
@@ -7860,48 +7679,10 @@ class LightShadowPlayground: public IApp
 		endUpdateResource(&asmUpdateUbDesc, NULL);
 	}
 
-	   
-	void drawQuad(Cmd* cmd)
-	{
-		RenderTarget* toDisplayTexture = pRenderTargetASMDepthAtlas;
-		RenderTargetBarrier quadBarriers[] = {
-		{
-			toDisplayTexture, RESOURCE_STATE_SHADER_RESOURCE},
-			{pRenderTargetDepth, RESOURCE_STATE_DEPTH_WRITE}
-		};
-
-		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, quadBarriers);
-
-		LoadActionsDesc loadActions = {};
-		loadActions.mLoadActionsColor[0] = LOAD_ACTION_DONTCARE;
-		loadActions.mClearColorValues[0].r = 0.0f;
-		loadActions.mClearColorValues[0].g = 0.0f;
-		loadActions.mClearColorValues[0].b = 0.0f;
-		loadActions.mClearColorValues[0].a = 0.0f;
-		loadActions.mLoadActionDepth = LOAD_ACTION_DONTCARE;
-		loadActions.mClearDepth.depth = 1.0f;
-		loadActions.mClearDepth.stencil = 0;
-
-		setRenderTarget(cmd, 1, &pRenderTargetScreen, pRenderTargetDepth, &loadActions);
-
-		const uint32_t quadStride = sizeof(float) * 6;
-		cmdBindPipeline(cmd, pPipelineQuad);
-		cmdBindVertexBuffer(cmd, 1, &pBufferQuadVertex, &quadStride, NULL);
-		cmdBindDescriptorSet(cmd, 0, pDescriptorSetQuad[0]);
-		cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetQuad[1]);
-
-		cmdDraw(cmd, 6, 0);
-
-		setRenderTarget(cmd, 0, NULL, NULL, NULL);
-
-	}
-
 	void UpdateInDraw()
 	{
 		// update camera with time
 			mat4 viewMat = pCameraController->getViewMatrix();
-
-		
 			/************************************************************************/
 			// Update Camera
 			/************************************************************************/
@@ -8034,6 +7815,8 @@ class LightShadowPlayground: public IApp
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pRenderCompleteFence);
 
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
+
 		UpdateInDraw();
 		if (gCurrentShadowType == SHADOW_TYPE_ASM)
 		{
@@ -8049,7 +7832,7 @@ class LightShadowPlayground: public IApp
 			gVisibilityBufferConstants[gFrameIndex].mCullingViewports[VIEW_SHADOW].mSampleCount = 1;
 
 			vec2 windowSize(ESM_SHADOWMAP_RES, ESM_SHADOWMAP_RES);
-#if defined(DIRECT3D12) || defined(METAL) || defined(ORBIS)
+#if defined(DIRECT3D12) || defined(METAL) || defined(ORBIS) || defined(PROSPERO)
 			gVisibilityBufferConstants[gFrameIndex].mCullingViewports[VIEW_SHADOW].mWindowSize = v2ToF2(windowSize);
 #elif defined(VULKAN)
 			gVisibilityBufferConstants[gFrameIndex].mCullingViewports[VIEW_SHADOW].mWindowSize = windowSize;
@@ -8100,7 +7883,6 @@ class LightShadowPlayground: public IApp
 			endUpdateResource(&esmBlurCbv, NULL);
 		}
 
-
 		BufferUpdateDesc quadUniformCbv = { pBufferQuadUniform[gFrameIndex] };
 		beginUpdateResource(&quadUniformCbv);
 		*(QuadDataUniform*)quadUniformCbv.pMappedData = gQuadUniformData;
@@ -8115,12 +7897,9 @@ class LightShadowPlayground: public IApp
 		/************************************************************************/
 		// Get command list to store rendering commands for this frame
 		{
-
-			Cmd* cmd = ppCmds[gFrameIndex];
+			Cmd* cmd = pCmds[gFrameIndex];
 			pRenderTargetScreen = pRenderTargetIntermediate;
 			beginCmd(cmd);
-
-
 
 			cmdBeginGpuFrameProfile(cmd, gGpuProfileToken);
 
@@ -8136,17 +7915,46 @@ class LightShadowPlayground: public IApp
 				for (uint32_t i = 0; i < NUM_CULLING_VIEWPORTS; ++i)
 				{
 					barriers2[index++] = { pBufferFilteredIndirectDrawArguments[gFrameIndex][GEOMSET_ALPHATESTED][i],
-						RESOURCE_STATE_INDIRECT_ARGUMENT | RESOURCE_STATE_SHADER_RESOURCE };
+						RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_INDIRECT_ARGUMENT | RESOURCE_STATE_SHADER_RESOURCE };
 					barriers2[index++] = { pBufferFilteredIndirectDrawArguments[gFrameIndex][GEOMSET_OPAQUE][i],
-						RESOURCE_STATE_INDIRECT_ARGUMENT | RESOURCE_STATE_SHADER_RESOURCE };
+						RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_INDIRECT_ARGUMENT | RESOURCE_STATE_SHADER_RESOURCE };
 					barriers2[index++] = { pBufferFilteredIndex[gFrameIndex][i],
-						RESOURCE_STATE_INDEX_BUFFER | RESOURCE_STATE_SHADER_RESOURCE };
+						RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_INDEX_BUFFER | RESOURCE_STATE_SHADER_RESOURCE };
 				}
-				barriers2[index++] = { pBufferFilterIndirectMaterial[gFrameIndex], RESOURCE_STATE_SHADER_RESOURCE };
+				barriers2[index++] = { pBufferFilterIndirectMaterial[gFrameIndex], RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_SHADER_RESOURCE };
 				cmdResourceBarrier(cmd, index, barriers2, 0, NULL, 0, NULL);
 			}
 			RenderTargetBarrier barriers[16] = {};
 			uint32_t barrierCount = 0;
+
+#if defined(VULKAN)
+			if (!pRenderTargetASMLodClamp->mUsed)
+			{
+				barriers[barrierCount++] = { pRenderTargetASMLodClamp, RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_SHADER_RESOURCE };
+				barriers[barrierCount++] = { pRenderTargetASMPrerenderLodClamp, RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_SHADER_RESOURCE };
+				barriers[barrierCount++] = { pRenderTargetUpSampleSDFShadow, RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_SHADER_RESOURCE };
+				for (uint32_t i = 0; i <= gs_ASMMaxRefinement; ++i)
+				{
+					barriers[barrierCount++] = { pRenderTargetASMIndirection[i], RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_SHADER_RESOURCE };
+					barriers[barrierCount++] = { pRenderTargetASMPrerenderIndirection[i], RESOURCE_STATE_UNDEFINED, RESOURCE_STATE_SHADER_RESOURCE };
+				}
+				cmdResourceBarrier(cmd, 0, NULL, 0, NULL, barrierCount, barriers);
+				barrierCount = 0;
+			}
+#endif
+
+			barriers[barrierCount++] = { pRenderTargetShadowMap, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_DEPTH_WRITE };
+			barriers[barrierCount++] = { pRenderTargetASMDEMAtlas, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET };
+			for (int32_t i = 0; i <= gs_ASMMaxRefinement; ++i)
+			{
+				barriers[barrierCount++] = { pASM->m_longRangeShadows->m_indirectionTexturesMips[i], RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET };
+				if (pASM->m_longRangePreRender->IsValid())
+				{
+					barriers[barrierCount++] = { pASM->m_longRangePreRender->m_indirectionTexturesMips[i], RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET };
+				}
+			}
+			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, barrierCount, barriers);
+			barrierCount = 0;
 
 			if (gCurrentShadowType == SHADOW_TYPE_ASM)
 			{
@@ -8157,28 +7965,27 @@ class LightShadowPlayground: public IApp
 			}
 			else if (gCurrentShadowType == SHADOW_TYPE_ESM)
 			{
-				barriers[0] = { pRenderTargetShadowMap, RESOURCE_STATE_DEPTH_WRITE };
-				cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
-
 				drawEsmShadowMap(cmd);
-
-				barriers[0] = { pRenderTargetShadowMap, RESOURCE_STATE_SHADER_RESOURCE };
-				cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 			}
+
+			barriers[barrierCount++] = { pRenderTargetShadowMap, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE };
 			// Draw To Screen
-			barriers[barrierCount++] = { pRenderTargetScreen, RESOURCE_STATE_RENDER_TARGET };
-			barriers[barrierCount++] = { pRenderTargetASMDepthPass, RESOURCE_STATE_SHADER_RESOURCE };
-			barriers[barrierCount++] = { pRenderTargetASMDepthAtlas, RESOURCE_STATE_SHADER_RESOURCE };
+			barriers[barrierCount++] = { pRenderTargetScreen, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET };
 
 			for (int32_t i = 0; i <= gs_ASMMaxRefinement; ++i)
 			{
-				barriers[barrierCount++] = { pRenderTargetASMIndirection[i], RESOURCE_STATE_SHADER_RESOURCE };
-				barriers[barrierCount++] = { pRenderTargetASMPrerenderIndirection[i], RESOURCE_STATE_SHADER_RESOURCE };
+				barriers[barrierCount++] = { pASM->m_longRangeShadows->m_indirectionTexturesMips[i], RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE };
+				if (pASM->m_longRangePreRender->IsValid())
+				{
+					barriers[barrierCount++] = { pASM->m_longRangePreRender->m_indirectionTexturesMips[i], RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE };
+				}
 			}
 
-			barriers[barrierCount++] = { pASM->m_longRangePreRender->m_lodClampTexture, RESOURCE_STATE_SHADER_RESOURCE };
-			barriers[barrierCount++] = { pRenderTargetASMDEMAtlas, RESOURCE_STATE_SHADER_RESOURCE };
-
+			if (pASM->m_longRangePreRender->IsValid())
+			{
+				barriers[barrierCount++] = { pASM->m_longRangePreRender->m_lodClampTexture, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE };
+			}
+			barriers[barrierCount++] = { pRenderTargetASMDEMAtlas, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE };
 			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, barrierCount, barriers);
 
 			if (gCurrentShadowType == SHADOW_TYPE_ASM || gCurrentShadowType == SHADOW_TYPE_ESM)
@@ -8189,6 +7996,9 @@ class LightShadowPlayground: public IApp
 			else if (gCurrentShadowType == SHADOW_TYPE_MESH_BAKED_SDF)
 			{
 				SDFVolumeTextureNode* volumeTextureNode = pSDFVolumeTextureAtlas->ProcessQueuedNode();
+
+				TextureBarrier uavBarriers[] = { { pTextureSDFVolumeAtlas, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS } };
+				cmdResourceBarrier(cmd, 0, NULL, 1, uavBarriers, 0, NULL);
 
 				if (volumeTextureNode)
 				{
@@ -8213,12 +8023,19 @@ class LightShadowPlayground: public IApp
 					}
 				}
 
+				barriers[0] = { pRenderTargetDepth, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE };
+				barriers[1] = { pRenderTargetSDFMeshVisualization, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
+				TextureBarrier textureBarriers[] =
+				{
+					{ pTextureSDFMeshShadow, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS },
+					{ pTextureSDFVolumeAtlas, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_SHADER_RESOURCE },
+				};
+				cmdResourceBarrier(cmd, 0, NULL, 2, textureBarriers, 2, barriers);
 
 				if (gBakedSDFMeshSettings.mDrawSDFMeshVisualization)
 				{
 					drawSDFMeshVisualizationOnScene(cmd);
 				}
-				
 				else
 				{
 					drawSDFMeshShadow(cmd);
@@ -8227,6 +8044,10 @@ class LightShadowPlayground: public IApp
 					upSampleSDFShadow(cmd);
 #endif
 				}
+
+				barriers[0] = { pRenderTargetDepth, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_DEPTH_WRITE };
+				barriers[1] = { pRenderTargetSDFMeshVisualization, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_SHADER_RESOURCE };
+				cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
 
 				drawVisibilityBufferShade(cmd, gFrameIndex);
 			}
@@ -8248,29 +8069,27 @@ class LightShadowPlayground: public IApp
 				pSrcRT = pRenderTargetScreen;
 			}
 
-			RenderTargetBarrier barrier[] =
-			{
-				{ pSrcRT, RESOURCE_STATE_SHADER_RESOURCE },
-				{ pDstRT, RESOURCE_STATE_RENDER_TARGET } };
-
-			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barrier);
+			barriers[0] = { pDstRT, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET };
+			barriers[1] = { pSrcRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE };
+			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, index == 1 ? 1 : 2, barriers);
 			presentImage(cmd, pSrcRT->pTexture, index, pDstRT);
 
 			drawGUI(cmd, presentIndex);
 			{
 				const uint32_t numBarriers = (gNumGeomSets * NUM_CULLING_VIEWPORTS) + NUM_CULLING_VIEWPORTS + 1;
 				uint32_t index = 0;
-				RenderTargetBarrier barrierPresent = { pDstRT, RESOURCE_STATE_PRESENT };
+				RenderTargetBarrier barrierPresent = { pDstRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 				BufferBarrier barriers2[numBarriers] = {};
 				for (uint32_t i = 0; i < NUM_CULLING_VIEWPORTS; ++i)
 				{
 					barriers2[index++] = { pBufferFilteredIndirectDrawArguments[gFrameIndex][GEOMSET_ALPHATESTED][i],
-						RESOURCE_STATE_UNORDERED_ACCESS };
+						RESOURCE_STATE_INDIRECT_ARGUMENT | RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
 					barriers2[index++] = { pBufferFilteredIndirectDrawArguments[gFrameIndex][GEOMSET_OPAQUE][i],
-						RESOURCE_STATE_UNORDERED_ACCESS };
-					barriers2[index++] = { pBufferFilteredIndex[gFrameIndex][i], RESOURCE_STATE_UNORDERED_ACCESS };
+						RESOURCE_STATE_INDIRECT_ARGUMENT | RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
+					barriers2[index++] = { pBufferFilteredIndex[gFrameIndex][i],
+						RESOURCE_STATE_INDEX_BUFFER | RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
 				}
-				barriers2[index++] = { pBufferFilterIndirectMaterial[gFrameIndex], RESOURCE_STATE_UNORDERED_ACCESS };
+				barriers2[index++] = { pBufferFilterIndirectMaterial[gFrameIndex], RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
 				cmdResourceBarrier(cmd, numBarriers, barriers2, 0, NULL, 1, &barrierPresent);
 			}
 			cmdEndGpuFrameProfile(cmd, gGpuProfileToken);
@@ -8300,17 +8119,16 @@ class LightShadowPlayground: public IApp
 
 	void drawGUI(Cmd* cmd, uint32_t frameIdx)
 	{
-
 		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw UI");
 
 		pRenderTargetScreen = pSwapChain->ppRenderTargets[frameIdx];
 #if !defined(TARGET_IOS)
 		cmdBindRenderTargets(cmd, 1, &pRenderTargetScreen, NULL, NULL, NULL, NULL, -1, -1);
 
-        cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
+        float2 txtSize = cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
 
 		// NOTE: Realtime GPU Profiling is not supported on Metal.
-        cmdDrawGpuProfile(cmd, float2(8.0f, 40.0f), gGpuProfileToken);
+        cmdDrawGpuProfile(cmd, float2(8.0f, txtSize.y + 30.f), gGpuProfileToken);
 		gAppUI.Gui(pGuiWindow);
 
 		if (gAppSettings.mIsGeneratingSDF)
@@ -8392,20 +8210,16 @@ class LightShadowPlayground: public IApp
 		depthRT.mArraySize = 1;
 		depthRT.mClearValue = depthStencilClear;
 		depthRT.mDepth = 1;
+		depthRT.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		depthRT.mFormat = TinyImageFormat_D32_SFLOAT;
+		depthRT.mStartState = RESOURCE_STATE_DEPTH_WRITE;
 		depthRT.mWidth = width;
 		depthRT.mHeight = height;
 		depthRT.mSampleCount = SAMPLE_COUNT_1;
 		depthRT.mSampleQuality = 0;
-		depthRT.pDebugName = L"Depth RT";
+		depthRT.pName = "Depth RT";
 		depthRT.mFlags = TEXTURE_CREATION_FLAG_ESRAM;
-#if defined(METAL)
-		depthRT.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
 		addRenderTarget(pRenderer, &depthRT, &pRenderTargetDepth);
-
-		
-
 		/************************************************************************/
 		// Intermediate render target
 		/************************************************************************/
@@ -8413,14 +8227,15 @@ class LightShadowPlayground: public IApp
 		postProcRTDesc.mArraySize = 1;
 		postProcRTDesc.mClearValue = {{0.0f, 0.0f, 0.0f, 0.0f}};
 		postProcRTDesc.mDepth = 1;
+		postProcRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		postProcRTDesc.mFormat = TinyImageFormat_R8G8B8A8_UNORM;
+		postProcRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		postProcRTDesc.mHeight = mSettings.mHeight;
 		postProcRTDesc.mWidth = mSettings.mWidth;
 		postProcRTDesc.mSampleCount = pSwapChain->ppRenderTargets[0]->mSampleCount;
 		postProcRTDesc.mSampleQuality = pSwapChain->ppRenderTargets[0]->mSampleQuality;
-		postProcRTDesc.pDebugName = L"pIntermediateRenderTarget";
+		postProcRTDesc.pName = "pIntermediateRenderTarget";
 		addRenderTarget(pRenderer, &postProcRTDesc, &pRenderTargetIntermediate);
-			   
 		/************************************************************************/
 		// Shadow Map Render Target
 		/************************************************************************/
@@ -8428,35 +8243,32 @@ class LightShadowPlayground: public IApp
 		shadowRTDesc.mArraySize = 1;
 		shadowRTDesc.mClearValue.depth = lessEqualDepthStencilClear.depth;
 		shadowRTDesc.mDepth = 1;
+		shadowRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		shadowRTDesc.mFormat = TinyImageFormat_D32_SFLOAT;
+		shadowRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		shadowRTDesc.mWidth = ESM_SHADOWMAP_RES;
 		shadowRTDesc.mHeight = ESM_SHADOWMAP_RES;
 		shadowRTDesc.mSampleCount = (SampleCount)ESM_MSAA_SAMPLES;
 		shadowRTDesc.mSampleQuality = 0;  
-		shadowRTDesc.pDebugName = L"Shadow Map RT";
-
+		shadowRTDesc.pName = "Shadow Map RT";
 		addRenderTarget(pRenderer, &shadowRTDesc, &pRenderTargetShadowMap);
-
-
-
 		/*************************************/
 		//SDF mesh visualization render target
 		/*************************************/
-
 		RenderTargetDesc sdfMeshVisualizationRTDesc = {};
 		sdfMeshVisualizationRTDesc.mArraySize = 1;
 		sdfMeshVisualizationRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE | DESCRIPTOR_TYPE_RW_TEXTURE;
 		sdfMeshVisualizationRTDesc.mClearValue = colorClearBlack;
 		sdfMeshVisualizationRTDesc.mDepth = 1;
 		sdfMeshVisualizationRTDesc.mFormat = TinyImageFormat_R32G32B32A32_SFLOAT;
+		sdfMeshVisualizationRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		sdfMeshVisualizationRTDesc.mWidth = mSettings.mWidth / SDF_SHADOW_DOWNSAMPLE_VALUE;
 		sdfMeshVisualizationRTDesc.mHeight = mSettings.mHeight / SDF_SHADOW_DOWNSAMPLE_VALUE;
 		sdfMeshVisualizationRTDesc.mMipLevels = 1;
 		sdfMeshVisualizationRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		sdfMeshVisualizationRTDesc.mSampleQuality = 0;
-		sdfMeshVisualizationRTDesc.pDebugName = L"SDF Mesh Visualization RT";
+		sdfMeshVisualizationRTDesc.pName = "SDF Mesh Visualization RT";
 		addRenderTarget(pRenderer, &sdfMeshVisualizationRTDesc, &pRenderTargetSDFMeshVisualization);
-
 
 		TextureDesc sdfMeshShadowRTDesc = {};
 		sdfMeshShadowRTDesc.mArraySize = 1;
@@ -8464,6 +8276,7 @@ class LightShadowPlayground: public IApp
 		sdfMeshShadowRTDesc.mClearValue = colorClearBlack;
 		sdfMeshShadowRTDesc.mDepth = 1;
 		sdfMeshShadowRTDesc.mFormat = TinyImageFormat_R32G32_SFLOAT;
+		sdfMeshShadowRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 #if ENABLE_SDF_SHADOW_DOWNSAMPLE
 		sdfMeshShadowRTDesc.mWidth = mSettings.mWidth / SDF_SHADOW_DOWNSAMPLE_VALUE;
 		sdfMeshShadowRTDesc.mHeight = mSettings.mHeight / SDF_SHADOW_DOWNSAMPLE_VALUE;
@@ -8474,66 +8287,59 @@ class LightShadowPlayground: public IApp
 		sdfMeshShadowRTDesc.mMipLevels = 1;
 		sdfMeshShadowRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		sdfMeshShadowRTDesc.mSampleQuality = 0;
-		sdfMeshShadowRTDesc.pDebugName = L"SDF Mesh Shadow Pass RT";
+		sdfMeshShadowRTDesc.pName = "SDF Mesh Shadow Pass RT";
 		TextureLoadDesc sdfMeshShadowLoadDesc = {};
 		sdfMeshShadowLoadDesc.pDesc = &sdfMeshShadowRTDesc;
-		sdfMeshShadowLoadDesc.ppTexture = &pRenderTargetSDFMeshShadow;
-		addResource(&sdfMeshShadowLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
-
+		sdfMeshShadowLoadDesc.ppTexture = &pTextureSDFMeshShadow;
+		addResource(&sdfMeshShadowLoadDesc, NULL);
 
 		RenderTargetDesc upSampleSDFShadowRTDesc = {};
 		upSampleSDFShadowRTDesc.mArraySize = 1;
 		upSampleSDFShadowRTDesc.mClearValue = colorClearBlack;
 		upSampleSDFShadowRTDesc.mDepth = 1;
 		upSampleSDFShadowRTDesc.mFormat = TinyImageFormat_R16_SFLOAT;
+		upSampleSDFShadowRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		upSampleSDFShadowRTDesc.mWidth = mSettings.mWidth;
 		upSampleSDFShadowRTDesc.mHeight = mSettings.mHeight;
 		upSampleSDFShadowRTDesc.mMipLevels = 1;
 		upSampleSDFShadowRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		upSampleSDFShadowRTDesc.mSampleQuality = 0;
-		upSampleSDFShadowRTDesc.pDebugName = L"Upsample SDF Mesh Shadow";
+		upSampleSDFShadowRTDesc.pName = "Upsample SDF Mesh Shadow";
 		addRenderTarget(pRenderer, &upSampleSDFShadowRTDesc, &pRenderTargetUpSampleSDFShadow);
-
-
 		/************************************************************************/
 		// ASM Depth Pass Render Target
 		/************************************************************************/
-
 		RenderTargetDesc ASMDepthPassRT = {};
 		ASMDepthPassRT.mArraySize = 1;
 		ASMDepthPassRT.mClearValue.depth = depthStencilClear.depth;
 		ASMDepthPassRT.mDepth = 1;
 		ASMDepthPassRT.mFormat = TinyImageFormat_D32_SFLOAT;
+		ASMDepthPassRT.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		ASMDepthPassRT.mMipLevels = 1;
 		ASMDepthPassRT.mSampleCount = SAMPLE_COUNT_1;
 		ASMDepthPassRT.mSampleQuality = 0;
 		ASMDepthPassRT.mWidth = ASM_WORK_BUFFER_DEPTH_PASS_WIDTH;
 		ASMDepthPassRT.mHeight = ASM_WORK_BUFFER_DEPTH_PASS_HEIGHT;
 		ASMDepthPassRT.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
-#if defined(METAL)
-		ASMDepthPassRT.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
+		ASMDepthPassRT.pName = "ASM Depth Pass RT";
 		addRenderTarget(pRenderer, &ASMDepthPassRT, &pRenderTargetASMDepthPass);
-
-
 		/*************************************************************************/
 		// ASM Color Pass Render Target
 		/*************************************************************************/
-
 		RenderTargetDesc ASMColorPassRT = {};
 		ASMColorPassRT.mArraySize = 1;
 		ASMColorPassRT.mClearValue = colorClearWhite;
 		ASMColorPassRT.mDepth = 1;
 		ASMColorPassRT.mFormat = TinyImageFormat_R32_SFLOAT;
+		ASMColorPassRT.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		ASMColorPassRT.mMipLevels = 1;
 		ASMColorPassRT.mSampleCount = SAMPLE_COUNT_1;
 		ASMColorPassRT.mSampleQuality = 0;
 		ASMColorPassRT.mWidth = ASM_WORK_BUFFER_COLOR_PASS_WIDTH;
 		ASMColorPassRT.mHeight = ASM_WORK_BUFFER_COLOR_PASS_HEIGHT;
 		ASMColorPassRT.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
+		ASMColorPassRT.pName = "ASM Depth Pass RT";
 		addRenderTarget(pRenderer, &ASMColorPassRT, &pRenderTargetASMColorPass);
-
-
 		/************************************************************************/
 		// Visibility buffer Pass Render Target
 		/************************************************************************/
@@ -8541,81 +8347,68 @@ class LightShadowPlayground: public IApp
 		vbRTDesc.mArraySize = 1;
 		vbRTDesc.mClearValue = colorClearWhite;
 		vbRTDesc.mDepth = 1;
+		vbRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		vbRTDesc.mFormat = TinyImageFormat_R8G8B8A8_UNORM;
+		vbRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		vbRTDesc.mWidth = width;
 		vbRTDesc.mHeight = height;
 		vbRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		vbRTDesc.mSampleQuality = 0;
 		vbRTDesc.mFlags = TEXTURE_CREATION_FLAG_ESRAM;
-		vbRTDesc.pDebugName = L"VB RT";
+		vbRTDesc.pName = "VB RT";
 		addRenderTarget(pRenderer, &vbRTDesc, &pRenderTargetVBPass);
-
-
-
 		/************************************************************************/
 		// ASM Depth Atlas Render Target
 		/************************************************************************/
-
 		RenderTargetDesc depthAtlasRTDesc = {};
 		depthAtlasRTDesc.mArraySize = 1;
 		depthAtlasRTDesc.mClearValue = colorClearBlack;
 		depthAtlasRTDesc.mDepth = 1;
 		depthAtlasRTDesc.mFormat = TinyImageFormat_R32_SFLOAT;
+		depthAtlasRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		depthAtlasRTDesc.mWidth = gs_ASMDepthAtlasTextureWidth;
 		depthAtlasRTDesc.mHeight = gs_ASMDepthAtlasTextureHeight;
 		depthAtlasRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		depthAtlasRTDesc.mSampleQuality = 0;
-		depthAtlasRTDesc.pDebugName = L"ASM Depth Atlas RT";
+		depthAtlasRTDesc.pName = "ASM Depth Atlas RT";
 		depthAtlasRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
-#if defined(METAL)
-		depthAtlasRTDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
 		addRenderTarget(pRenderer, &depthAtlasRTDesc, &pRenderTargetASMDepthAtlas);
-
 
 		RenderTargetDesc DEMAtlasRTDesc = {};
 		DEMAtlasRTDesc.mArraySize = 1;
 		DEMAtlasRTDesc.mClearValue = colorClearBlack;
 		DEMAtlasRTDesc.mDepth = 1;
 		DEMAtlasRTDesc.mFormat = TinyImageFormat_R32_SFLOAT;
+		DEMAtlasRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		DEMAtlasRTDesc.mWidth = gs_ASMDEMAtlasTextureWidth;
 		DEMAtlasRTDesc.mHeight = gs_ASMDEMAtlasTextureHeight;
 		DEMAtlasRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		DEMAtlasRTDesc.mSampleQuality = 0;
-		DEMAtlasRTDesc.pDebugName = L"ASM DEM Atlas RT";
+		DEMAtlasRTDesc.pName = "ASM DEM Atlas RT";
 		DEMAtlasRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
-#if defined(METAL)
-		DEMAtlasRTDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
-		
 		addRenderTarget(pRenderer, &DEMAtlasRTDesc, &pRenderTargetASMDEMAtlas);
-
 		/************************************************************************/
 		// ASM Indirection texture Render Target
 		/************************************************************************/
-
-		uint32 indirectionTextureSize = (1 << gs_ASMMaxRefinement) * gsASMIndexSize;
+		uint32_t indirectionTextureSize = (1 << gs_ASMMaxRefinement) * gsASMIndexSize;
 
 		RenderTargetDesc indirectionRTDesc = {};
 		indirectionRTDesc.mArraySize = 1;
 		indirectionRTDesc.mClearValue = colorClearBlack;
 		indirectionRTDesc.mDepth = 1;
 		indirectionRTDesc.mFormat = TinyImageFormat_R32G32B32A32_SFLOAT;
+		indirectionRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		indirectionRTDesc.mWidth = indirectionTextureSize;
 		indirectionRTDesc.mHeight = indirectionTextureSize;
 		indirectionRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		indirectionRTDesc.mSampleQuality = 0;
 		indirectionRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		indirectionRTDesc.mMipLevels = 1;
-#if defined(METAL)
-		indirectionRTDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
-
-		indirectionRTDesc.pDebugName = L"ASM Indirection RT";
+		indirectionRTDesc.pName = "ASM Indirection RT";
 
 		for (int32_t i = 0; i <= gs_ASMMaxRefinement; ++i)
 		{
-			uint32 mewIndirectionTextureSize = (indirectionTextureSize >> i);
+			uint32_t mewIndirectionTextureSize = (indirectionTextureSize >> i);
 			indirectionRTDesc.mWidth = mewIndirectionTextureSize;
 			indirectionRTDesc.mHeight = mewIndirectionTextureSize;
 			addRenderTarget(pRenderer, &indirectionRTDesc, &pRenderTargetASMIndirection[i]);
@@ -8627,20 +8420,17 @@ class LightShadowPlayground: public IApp
 		lodClampRTDesc.mClearValue = colorClearWhite;
 		lodClampRTDesc.mDepth = 1;
 		lodClampRTDesc.mFormat = TinyImageFormat_R16_SFLOAT;
+		lodClampRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		lodClampRTDesc.mWidth = indirectionTextureSize;
 		lodClampRTDesc.mHeight = indirectionTextureSize;
 		lodClampRTDesc.mSampleCount = SAMPLE_COUNT_1;
 		lodClampRTDesc.mSampleQuality = 0;
 		lodClampRTDesc.mMipLevels = 1;
-		lodClampRTDesc.pDebugName = L"ASM Lod Clamp RT";
+		lodClampRTDesc.pName = "ASM Lod Clamp RT";
 		lodClampRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
-		
-#if defined(METAL)
-		lodClampRTDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-#endif
-
 		addRenderTarget(pRenderer, &lodClampRTDesc, &pRenderTargetASMLodClamp);
 		addRenderTarget(pRenderer, &lodClampRTDesc, &pRenderTargetASMPrerenderLodClamp);
+
 		return true;
 	}
 
@@ -8831,7 +8621,7 @@ class LightShadowPlayground: public IApp
 #if ENABLE_SDF_SHADOW_DOWNSAMPLE
 			Texture* sdfShadowTexture = pRenderTargetUpSampleSDFShadow->pTexture;
 #else
-			Texture* sdfShadowTexture = pRenderTargetSDFMeshShadow;
+			Texture* sdfShadowTexture = pTextureSDFMeshShadow;
 #endif
 			Texture* esmShadowMap = pRenderTargetShadowMap->pTexture;
 
@@ -8914,7 +8704,7 @@ class LightShadowPlayground: public IApp
 				vbShadeParams[6].ppBuffers = &pBufferRenderSettings[i];
 				vbShadeParams[7].pName = "ESMInputConstants";
 				vbShadeParams[7].ppBuffers = &pBufferESMUniform[i];
-#if defined(ORBIS)
+#if defined(ORBIS) || defined(PROSPERO)
 				vbShadeParams[8].pName = "indirectDrawArgsOpaque";
 				vbShadeParams[8].ppBuffers = &pIndirectBuffers[GEOMSET_OPAQUE];
 				vbShadeParams[9].pName = "indirectDrawArgsAlpha";
@@ -9091,7 +8881,7 @@ class LightShadowPlayground: public IApp
 		{
 			DescriptorData params[3] = {};
 			params[0].pName = "OutTexture";
-			params[0].ppTextures = &pRenderTargetSDFMeshShadow;
+			params[0].ppTextures = &pTextureSDFMeshShadow;
 			params[1].pName = "SDFVolumeTextureAtlas";
 			params[1].ppTextures = &pTextureSDFVolumeAtlas;
 			params[2].pName = "DepthTexture";
@@ -9112,7 +8902,7 @@ class LightShadowPlayground: public IApp
 		{
 			DescriptorData params[3] = {};
 			params[0].pName = "SDFShadowTexture";
-			params[0].ppTextures = &pRenderTargetSDFMeshShadow;
+			params[0].ppTextures = &pTextureSDFMeshShadow;
 			params[1].pName = "DepthTexture";
 			params[1].ppTextures = &pRenderTargetDepth->pTexture;
 			updateDescriptorSet(pRenderer, 0, pDescriptorSetUpsampleSDFShadow[0], 2, params);

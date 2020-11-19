@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018 Confetti Interactive Inc.
+* Copyright (c) 2018 The Forge Interactive Inc.
 *
 * This file is part of The-Forge
 * (see https://github.com/ConfettiFX/The-Forge).
@@ -52,7 +52,7 @@
 // The denoiser is only supported on macOS Catalina and higher. If you want to use the denoiser, set
 // USE_DENOISER to 1 in the #if block below.
 #if defined(METAL) && !defined(TARGET_IOS) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101500
-#define USE_DENOISER 0
+#define USE_DENOISER 1
 #else
 #define USE_DENOISER 0
 #endif
@@ -448,11 +448,10 @@ bool LoadSponza()
 {
 	for (int i = 0; i < TOTAL_IMGS; ++i)
 	{
-		PathHandle texturePath = fsGetPathInResourceDirEnum(RD_TEXTURES, pMaterialImageFileNames[i]);
 		TextureLoadDesc textureDesc = {};
-		textureDesc.pFilePath = texturePath;
+		textureDesc.pFileName = pMaterialImageFileNames[i];
 		textureDesc.ppTexture = &pMaterialTextures[i];
-		addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&textureDesc, NULL);
 	}
 
 	VertexLayout vertexLayout = {};
@@ -479,13 +478,12 @@ bool LoadSponza()
 	vertexLayout.mAttribs[2].mOffset = 0;
 
 	SyncToken token = {};
-	PathHandle sceneFullPath = fsGetPathInResourceDirEnum(RD_MESHES, gModel_Sponza_File);
 	GeometryLoadDesc loadDesc = {};
-	loadDesc.pFilePath = sceneFullPath;
+	loadDesc.pFileName = gModel_Sponza_File;
 	loadDesc.ppGeometry = &SponzaProp.pGeom;
 	loadDesc.pVertexLayout = &vertexLayout;
 	loadDesc.mFlags = GEOMETRY_LOAD_FLAG_SHADOWED;
-	addResource(&loadDesc, &token, LOAD_PRIORITY_HIGH);
+	addResource(&loadDesc, &token);
 
 	waitForToken(&token);
 
@@ -503,10 +501,11 @@ bool LoadSponza()
 	BufferLoadDesc desc = {};
 	desc.mDesc.mDescriptors = DESCRIPTOR_TYPE_BUFFER_RAW;
 	desc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
+	desc.mDesc.mStartState = RESOURCE_STATE_COMMON;
 	desc.mDesc.mSize = totalPrimitiveCount * sizeof(uint32_t);
 	desc.mDesc.mElementCount = totalPrimitiveCount;
 	desc.ppBuffer = &SponzaProp.pMaterialIdStream;
-	addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
+	addResource(&desc, NULL);
 
 	BufferUpdateDesc updateDesc = {};
 	updateDesc.pBuffer = SponzaProp.pMaterialIdStream;
@@ -535,7 +534,7 @@ bool LoadSponza()
         desc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
         desc.pData = &data;
         desc.ppBuffer = &SponzaProp.pConstantBuffer;
-        addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
+        addResource(&desc, NULL);
     }
 	
 	AssignSponzaTextures();
@@ -544,7 +543,7 @@ bool LoadSponza()
 	desc.mDesc.mElementCount = (uint32_t)gSponzaTextureIndexForMaterial.size();
 	desc.ppBuffer = &SponzaProp.pMaterialTexturesStream;
 	desc.pData = gSponzaTextureIndexForMaterial.data();
-	addResource(&desc, NULL, LOAD_PRIORITY_NORMAL);
+	addResource(&desc, NULL);
 	
 	return true;
 }
@@ -560,7 +559,7 @@ void UnloadSponza()
 
 	gSponzaTextureIndexForMaterial.set_capacity(0);
 	
-	conf_free(SponzaProp.pGeom->pShadow);
+	tf_free(SponzaProp.pGeom->pShadow);
 	
 	removeResource(SponzaProp.pGeom);
 	removeResource(SponzaProp.pMaterialIdStream);
@@ -621,22 +620,14 @@ public:
 	
 	bool Init()
 	{
-        // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/16_Raytracing");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-			fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        				 "../../../../Art/Sponza/Textures");
-			fsSetRelativePathForResourceDirEnum(RD_MESHES,          				 "../../../../Art/Sponza/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,   				 "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,      				 "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT, 				 "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,   				 "../../../../Middleware_3/UI");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_3, 					 "../../../../Middleware_3/ParallelPrimitives");
-        }
-        
+		// FILE PATHS
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES, "Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES, "CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG, "GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES, "Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_MESHES, "Meshes");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS, "Fonts");
+
 		if (!initInputSystem(pWindow))
 			return false;
 
@@ -654,12 +645,15 @@ public:
 		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pQueue);
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
 
 		addSemaphore(pRenderer, &pImageAcquiredSemaphore);
 		for (uint32_t i = 0; i < gImageCount; ++i)
@@ -671,7 +665,7 @@ public:
 		if (!gAppUI.Init(pRenderer))
 			return false;
 
-		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 
         const char* ppGpuProfilerName[1] = { "Graphics" };
         initProfiler(pRenderer, &pQueue, ppGpuProfilerName, &gGpuProfileToken, 1);
@@ -680,17 +674,16 @@ public:
 		/************************************************************************/
 		// GUI
 		/************************************************************************/
-		GuiDesc guiDesc = {};
-		guiDesc.mStartSize = vec2(300.0f, 250.0f);
-		guiDesc.mStartPosition = vec2(0.0f, guiDesc.mStartSize.getY());
+		GuiDesc guiDesc = {};		
+		guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.15f);
 		pGuiWindow = gAppUI.AddGuiComponent(GetName(), &guiDesc);
         /************************************************************************/
         // Blit texture
         /************************************************************************/
 		ShaderMacro denoiserMacro  = { "DENOISER_ENABLED", USE_DENOISER ? "1" : "0" };
         ShaderLoadDesc displayShader = {};
-        displayShader.mStages[0] = { "DisplayTexture.vert", &denoiserMacro, 1, RD_SHADER_SOURCES };
-        displayShader.mStages[1] = { "DisplayTexture.frag", &denoiserMacro, 1, RD_SHADER_SOURCES };
+        displayShader.mStages[0] = { "DisplayTexture.vert", &denoiserMacro, 1 };
+        displayShader.mStages[1] = { "DisplayTexture.frag", &denoiserMacro, 1 };
         addShader(pRenderer, &displayShader, &pDisplayTextureShader);
         
         SamplerDesc samplerDesc = { FILTER_NEAREST,
@@ -788,10 +781,10 @@ public:
 		AccelerationStructureGeometryDesc geomDesc = {};
 		geomDesc.mFlags = ACCELERATION_STRUCTURE_GEOMETRY_FLAG_OPAQUE;
 		geomDesc.pVertexArray = SponzaProp.pGeom->pShadow->pAttributes[SEMANTIC_POSITION];
-		geomDesc.vertexCount = (uint32_t)SponzaProp.pGeom->mVertexCount;
+		geomDesc.mVertexCount = (uint32_t)SponzaProp.pGeom->mVertexCount;
 		geomDesc.pIndices32 = (uint32_t*)SponzaProp.pGeom->pShadow->pIndices;
-		geomDesc.indicesCount = (uint32_t)SponzaProp.pGeom->mIndexCount;
-		geomDesc.indexType = INDEX_TYPE_UINT32;
+		geomDesc.mIndexCount = (uint32_t)SponzaProp.pGeom->mIndexCount;
+		geomDesc.mIndexType = INDEX_TYPE_UINT32;
 		
 		AccelerationStructureDescBottom bottomASDesc = {};
 		bottomASDesc.mDescCount = 1;
@@ -799,8 +792,7 @@ public:
 		bottomASDesc.mFlags = ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
 
         AccelerationStructureDescTop topAS = {};
-        topAS.mBottomASDescs = &bottomASDesc;
-        topAS.mBottomASDescsCount = 1;
+        topAS.mBottomASDesc = &bottomASDesc;
         
         // The transformation matrices for the instances
         mat4 transformation = mat4::identity(); // Identity
@@ -818,19 +810,22 @@ public:
         topAS.mInstancesDescCount = 1;
         topAS.pInstanceDescs = &instanceDesc;
         addAccelerationStructure(pRaytracing, &topAS, &pSponzaAS);
-        
+		waitForAllResourceLoads();
+
         // Build Acceleration Structure
 		RaytracingBuildASDesc buildASDesc = {};
 		unsigned bottomASIndices[] = { 0 };
-		buildASDesc.pAccelerationStructure = pSponzaAS;
+		buildASDesc.ppAccelerationStructures = &pSponzaAS;
 		buildASDesc.pBottomASIndices = &bottomASIndices[0];
 		buildASDesc.mBottomASIndicesCount = 1;
-        beginCmd(ppCmds[0]);
-		cmdBuildAccelerationStructure(ppCmds[0], pRaytracing, &buildASDesc);
-        endCmd(ppCmds[0]);
+		buildASDesc.mCount = 1;
+        beginCmd(pCmds[0]);
+		cmdBuildAccelerationStructure(pCmds[0], pRaytracing, &buildASDesc);
+        endCmd(pCmds[0]);
+
 		QueueSubmitDesc submitDesc = {};
 		submitDesc.mCmdCount = 1;
-		submitDesc.ppCmds = ppCmds;
+		submitDesc.ppCmds = pCmds;
 		submitDesc.pSignalFence = pRenderCompleteFences[0];
 		submitDesc.mSubmitDone = true;
         queueSubmit(pQueue, &submitDesc);
@@ -842,19 +837,19 @@ public:
 			
 			ShaderMacro denoiserMacro  = { "DENOISER_ENABLED", USE_DENOISER ? "1" : "0" };
             ShaderLoadDesc desc = {};
-            desc.mStages[0] = { "RayGen.rgen", &denoiserMacro, 1, RD_SHADER_SOURCES, "rayGen"};
+            desc.mStages[0] = { "RayGen.rgen", &denoiserMacro, 1, "rayGen" };
 #ifndef DIRECT3D11
             desc.mTarget = shader_target_6_3;
 #endif
             addShader(pRenderer, &desc, &pShaderRayGen);
             
-            desc.mStages[0] = { "ClosestHit.rchit", &denoiserMacro, 1, RD_SHADER_SOURCES, "chs"};
+            desc.mStages[0] = { "ClosestHit.rchit", &denoiserMacro, 1, "chs" };
             addShader(pRenderer, &desc, &pShaderClosestHit);
             
-            desc.mStages[0] = { "Miss.rmiss", &denoiserMacro, 1, RD_SHADER_SOURCES, "miss"};
+            desc.mStages[0] = { "Miss.rmiss", &denoiserMacro, 1, "miss" };
             addShader(pRenderer, &desc, &pShaderMiss);
             
-            desc.mStages[0] = { "MissShadow.rmiss", &denoiserMacro, 1, RD_SHADER_SOURCES, "missShadow"};
+            desc.mStages[0] = { "MissShadow.rmiss", &denoiserMacro, 1, "missShadow" };
             addShader(pRenderer, &desc, &pShaderMissShadow);
         }
 		
@@ -909,11 +904,12 @@ public:
 		BufferLoadDesc ubDesc = {};
 		ubDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		ubDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
+		ubDesc.mDesc.mStartState = RESOURCE_STATE_COMMON;
 		ubDesc.mDesc.mSize = sizeof(ShadersConfigBlock);
 		for (uint32_t i = 0; i < gImageCount; i++)
 		{
 			ubDesc.ppBuffer = &pRayGenConfigBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 
 		DescriptorSetDesc setDesc = { pDisplayTextureSignature, DESCRIPTOR_UPDATE_FREQ_PER_FRAME, gImageCount };
@@ -1001,8 +997,11 @@ public:
 			removeSemaphore(pRenderer, pRenderCompleteSemaphores[i]);
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
 		removeQueue(pRenderer, pQueue);
         exitResourceLoaderInterface(pRenderer);
 		removeRenderer(pRenderer);
@@ -1024,7 +1023,7 @@ public:
 		uavDesc.mHeight = mSettings.mHeight;
 		uavDesc.mMipLevels = 1;
 		uavDesc.mSampleCount = SAMPLE_COUNT_1;
-		uavDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;// RESOURCE_STATE_UNORDERED_ACCESS;
+		uavDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		uavDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE | DESCRIPTOR_TYPE_RW_TEXTURE;
 		uavDesc.mWidth = mSettings.mWidth;
 #ifdef METAL
@@ -1033,16 +1032,16 @@ public:
 		TextureLoadDesc loadDesc = {};
 		loadDesc.pDesc = &uavDesc;
 		loadDesc.ppTexture = &pComputeOutput;
-		addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&loadDesc, NULL);
 		
 #if USE_DENOISER
 		uavDesc.mFormat = TinyImageFormat_B10G10R10A2_UNORM;
 		loadDesc.ppTexture = &pAlbedoTexture;
-		addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&loadDesc, NULL);
 #endif
 
 		SwapChainDesc swapChainDesc = {};
-		swapChainDesc.mColorClearValue = { 1, 1, 1, 1 };
+		swapChainDesc.mColorClearValue = { { 1, 1, 1, 1 } };
 		swapChainDesc.mColorFormat = TinyImageFormat_B8G8R8A8_SRGB; // getRecommendedSwapchainFormat(true);
 		swapChainDesc.mEnableVsync = false;
 		swapChainDesc.mHeight = mSettings.mHeight;
@@ -1078,8 +1077,8 @@ public:
 			addRenderTarget(pRenderer, &rtDesc, &pDepthRenderTarget);
 			
 			ShaderLoadDesc denoiserShader = {};
-			denoiserShader.mStages[0] = { "DenoiserInputsPass.vert", NULL, 0, RD_SHADER_SOURCES };
-			denoiserShader.mStages[1] = { "DenoiserInputsPass.frag", NULL, 0, RD_SHADER_SOURCES };
+			denoiserShader.mStages[0] = { "DenoiserInputsPass.vert", NULL, 0 };
+			denoiserShader.mStages[1] = { "DenoiserInputsPass.frag", NULL, 0 };
 			addShader(pRenderer, &denoiserShader, &pDenoiserInputsShader);
 			
 			RootSignatureDesc rootSignature = {};
@@ -1102,7 +1101,16 @@ public:
 			TinyImageFormat rtFormats[] = { pDepthNormalRenderTarget[0]->mFormat, pMotionVectorRenderTarget->mFormat };
 			
 			VertexLayout vertexLayout = {};
-			vertexLayout.mAttribCount = 0;
+			vertexLayout.mAttribCount = 2;
+			vertexLayout.mAttribs[0].mSemantic = SEMANTIC_POSITION;
+			vertexLayout.mAttribs[0].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
+			vertexLayout.mAttribs[0].mBinding = 0;
+			vertexLayout.mAttribs[0].mLocation = 0;
+			vertexLayout.mAttribs[1].mSemantic = SEMANTIC_NORMAL;
+			vertexLayout.mAttribs[1].mFormat = TinyImageFormat_R32G32B32_SFLOAT;
+			vertexLayout.mAttribs[1].mBinding = 1;
+			vertexLayout.mAttribs[1].mLocation = 1;
+			
 			GraphicsPipelineDesc& pipelineSettings = pipelineDesc.mGraphicsDesc;
 			pipelineSettings.mPrimitiveTopo = PRIMITIVE_TOPO_TRI_LIST;
 			pipelineSettings.pRasterizerState = &rasterState;
@@ -1125,7 +1133,7 @@ public:
 			for (uint32_t i = 0; i < gImageCount; i++)
 			{
 				ubDesc.ppBuffer = &pDenoiserInputsUniformBuffer[i];
-				addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+				addResource(&ubDesc, NULL);
 			}
 			
 			DescriptorSetDesc setDesc = { pDenoiserInputsRootSignature, DESCRIPTOR_UPDATE_FREQ_PER_FRAME, gImageCount };
@@ -1164,14 +1172,7 @@ public:
         addPipeline(pRenderer, &graphicsPipelineDesc, &pDisplayTexturePipeline);
 		/************************************************************************/
 		/************************************************************************/
-		
-#ifdef TARGET_IOS
-		ResourceDirEnum circlePadDirectory = RD_ROOT;
-#else
-		ResourceDirEnum circlePadDirectory = RD_TEXTURES;
-#endif
-		
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", circlePadDirectory))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 			return false;
 		
 		if (!gAppUI.Load(pSwapChain->ppRenderTargets))
@@ -1281,19 +1282,22 @@ public:
 
 		gAppUI.Update(deltaTime);
 
-        ++nFrameCount;
+		++nFrameCount;
 	}
 
 	void Draw()
 	{
-        PROFILER_SET_CPU_SCOPE("Cpu Profile", "draw", 0xffffff);
+		PROFILER_SET_CPU_SCOPE("Cpu Profile", "draw", 0xffffff);
 
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &mFrameIdx);
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
 
 		FenceStatus fenceStatus = {};
 		getFenceStatus(pRenderer, pRenderCompleteFences[mFrameIdx], &fenceStatus);
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pRenderCompleteFences[mFrameIdx]);
+
+		resetCmdPool(pRenderer, pCmdPools[mFrameIdx]);
 
 		if (pRaytracing != NULL)
 		{
@@ -1348,7 +1352,7 @@ public:
 			beginUpdateResource(&bufferUpdate);
 			*(ShadersConfigBlock*)bufferUpdate.pMappedData = cb;
 			endUpdateResource(&bufferUpdate, NULL);
-			
+
 #if USE_DENOISER
 			bufferUpdate = {};
 			bufferUpdate.pBuffer = pDenoiserInputsUniformBuffer[mFrameIdx];
@@ -1368,7 +1372,7 @@ public:
 			mPathTracingData.mHaltonIndex = (mPathTracingData.mHaltonIndex + 1) % 16;
 		}
 		
-		Cmd* pCmd = ppCmds[mFrameIdx];
+		Cmd* pCmd = pCmds[mFrameIdx];
 		beginCmd(pCmd);
 		cmdBeginGpuFrameProfile(pCmd, gGpuProfileToken);
 		
@@ -1378,11 +1382,10 @@ public:
 			RenderTarget* depthNormalTarget = pDepthNormalRenderTarget[mPathTracingData.mFrameIndex & 0x1];
 			
 			RenderTargetBarrier barriers[] = {
-				{ pDepthRenderTarget, RESOURCE_STATE_RENDER_TARGET },
-				{ depthNormalTarget, RESOURCE_STATE_RENDER_TARGET },
-				{ pMotionVectorRenderTarget, RESOURCE_STATE_RENDER_TARGET },
+				{ pDepthRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+				{ depthNormalTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+				{ pMotionVectorRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
 			};
-			
 			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 3, barriers);
 			
 			RenderTarget* denoiserRTs[] = { depthNormalTarget, pMotionVectorRenderTarget };
@@ -1394,7 +1397,7 @@ public:
 			loadActions.mLoadActionDepth = LOAD_ACTION_CLEAR;
 			loadActions.mClearDepth = { 1.f };
 			
-			cmdBeginGpuTimestampQuery(pCmd, pGpuProfiler, "Generate Denoiser Inputs");
+			cmdBeginGpuTimestampQuery(pCmd, gGpuProfileToken, "Generate Denoiser Inputs");
 			cmdBindRenderTargets(pCmd, 2, denoiserRTs, pDepthRenderTarget, &loadActions, NULL, NULL, 0, 0);
 			
 			cmdBindPipeline(pCmd, pDenoiserInputsPipeline);
@@ -1407,7 +1410,7 @@ public:
 			cmdDrawIndexed(pCmd, SponzaProp.pGeom->mIndexCount, 0, 0);
 			
 			cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, 0, 0);
-			cmdEndGpuTimestampQuery(pCmd, pGpuProfiler);
+			cmdEndGpuTimestampQuery(pCmd, gGpuProfileToken);
 		}
 #endif
 		
@@ -1415,7 +1418,7 @@ public:
 		// Transition UAV texture so raytracing shader can write to it
 		/************************************************************************/
 		cmdBeginGpuTimestampQuery(pCmd, gGpuProfileToken, "Path Trace Scene");
-		TextureBarrier uavBarrier = { pComputeOutput, RESOURCE_STATE_UNORDERED_ACCESS };
+		TextureBarrier uavBarrier = { pComputeOutput, RESOURCE_STATE_PIXEL_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
 		cmdResourceBarrier(pCmd, 0, NULL, 1, &uavBarrier, 0, NULL);
 		/************************************************************************/
 		// Perform raytracing
@@ -1447,22 +1450,22 @@ public:
 		/************************************************************************/
 		// Transition UAV to be used as source and swapchain as destination in copy operation
 		/************************************************************************/
-		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[mFrameIdx];
+		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		TextureBarrier copyBarriers[] = {
-			{ pComputeOutput, RESOURCE_STATE_SHADER_RESOURCE },
+			{ pComputeOutput, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_PIXEL_SHADER_RESOURCE },
 		};
 		RenderTargetBarrier rtCopyBarriers[] = {
-			{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
+			{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
 		};
 		cmdResourceBarrier(pCmd, 0, NULL, 1, copyBarriers, 1, rtCopyBarriers);
 		
-		Texture* pathTracedTexture = pComputeOutput;
 #if USE_DENOISER
-		Texture* denoisedTexture = cmdSSVGFDenoise(pCmd, pDenoiser,
+		Texture* denoisedTexture = NULL;
+		cmdSSVGFDenoise(pCmd, pDenoiser,
 						pComputeOutput,
 						pMotionVectorRenderTarget->pTexture,
 						pDepthNormalRenderTarget[mPathTracingData.mFrameIndex & 0x1]->pTexture,
-						pDepthNormalRenderTarget[(mPathTracingData.mFrameIndex + 1) & 0x1]->pTexture);
+						pDepthNormalRenderTarget[(mPathTracingData.mFrameIndex + 1) & 0x1]->pTexture, &denoisedTexture);
 		
 		DescriptorData params[1] = {};
 		params[0].pName = "uTex0";
@@ -1498,14 +1501,13 @@ public:
 
 		cmdBeginDebugMarker(pCmd, 0, 1, 0, "Draw UI");
 		
-		
 		gVirtualJoystick.Draw(pCmd, { 1.0f, 1.0f, 1.0f, 1.0f });
 		
         TextDrawDesc frameTimeDraw = TextDrawDesc(0, 0xff0080ff, 18);
-        cmdDrawCpuProfile(pCmd, float2(8.0f, 15.0f), &frameTimeDraw);
+        float2 txtSize = cmdDrawCpuProfile(pCmd, float2(8.0f, 15.0f), &frameTimeDraw);
 
 #if !defined(__ANDROID__)
-        cmdDrawGpuProfile(pCmd, float2(8, 40), gGpuProfileToken);
+        cmdDrawGpuProfile(pCmd, float2(8.f, txtSize.y + 30.f), gGpuProfileToken);
 #endif
 		
 		cmdDrawProfilerUI();
@@ -1514,12 +1516,14 @@ public:
 		gAppUI.Draw(pCmd);
 		cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
-		RenderTargetBarrier presentBarrier = { pRenderTarget, RESOURCE_STATE_PRESENT };
+		RenderTargetBarrier presentBarrier = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, &presentBarrier);
 
 		cmdEndGpuFrameProfile(pCmd, gGpuProfileToken);
 		
 		endCmd(pCmd);
+		waitForAllResourceLoads();
+
 		QueueSubmitDesc submitDesc = {};
 		submitDesc.mCmdCount = 1;
 		submitDesc.mSignalSemaphoreCount = 1;
@@ -1530,13 +1534,15 @@ public:
 		submitDesc.pSignalFence = pRenderCompleteFences[mFrameIdx];
 		queueSubmit(pQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = mFrameIdx;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphores[mFrameIdx];
 		presentDesc.pSwapChain = pSwapChain;
 		presentDesc.mSubmitDone = true;
 		queuePresent(pQueue, &presentDesc);
 		flipProfiler();
+		
+		mFrameIdx = (mFrameIdx + 1) % gImageCount;
 		/************************************************************************/
 		/************************************************************************/
 	}
@@ -1554,52 +1560,52 @@ private:
 
     uint32_t                nFrameCount = 0;
     uint32_t                nBenchmarkFrames = 64;
-	bool					mBenchmark  = false;
-	char					mOutput[1024] = "\0";
+	bool                    mBenchmark  = false;
+	char                    mOutput[1024] = "\0";
 	
-	Renderer*			   pRenderer;
-	Raytracing*			 pRaytracing;
-	Queue*				  pQueue;
-	CmdPool*				pCmdPool;
-	Cmd**				   ppCmds;
-	Fence*				  pRenderCompleteFences[gImageCount];
-	Buffer*				 pRayGenConfigBuffer[gImageCount];
+	Renderer*               pRenderer;
+	Raytracing*	            pRaytracing;
+	Queue*                  pQueue;
+	CmdPool*                pCmdPools[gImageCount];
+	Cmd*                    pCmds[gImageCount];
+	Fence*                  pRenderCompleteFences[gImageCount];
+	Buffer*                 pRayGenConfigBuffer[gImageCount];
 	AccelerationStructure*  pSponzaAS;
-	Shader*	   pShaderRayGen;
-	Shader*	   pShaderClosestHit;
-	Shader*	   pShaderMiss;
-	Shader*	   pShaderMissShadow;
+	Shader*	                pShaderRayGen;
+	Shader*	                pShaderClosestHit;
+	Shader*	                pShaderMiss;
+	Shader*	                pShaderMissShadow;
     Shader*                 pDisplayTextureShader;
     Sampler*                pSampler;
-	Sampler*				pLinearSampler;
-	RootSignature*			pRootSignature;
+	Sampler*                pLinearSampler;
+	RootSignature*          pRootSignature;
     RootSignature*          pDisplayTextureSignature;
 	DescriptorSet*          pDescriptorSetRaytracing;
 	DescriptorSet*          pDescriptorSetUniforms;
 	DescriptorSet*          pDescriptorSetTexture;
-	Pipeline*				pPipeline;
+	Pipeline*               pPipeline;
     Pipeline*               pDisplayTexturePipeline;
 	RaytracingShaderTable*  pShaderTable;
-	SwapChain*				pSwapChain;
-	Texture*				pComputeOutput;
-	Semaphore*				pRenderCompleteSemaphores[gImageCount];
-	Semaphore*				pImageAcquiredSemaphore;
-	uint32_t				mFrameIdx = 0;
-	PathTracingData			mPathTracingData = {};
-	GuiComponent*			pGuiWindow;
-	float3					mLightDirection = float3(0.2f, 0.8f, 0.1f);
+	SwapChain*              pSwapChain;
+	Texture*                pComputeOutput;
+	Semaphore*              pRenderCompleteSemaphores[gImageCount];
+	Semaphore*              pImageAcquiredSemaphore;
+	uint32_t                mFrameIdx = 0;
+	PathTracingData         mPathTracingData = {};
+	GuiComponent*           pGuiWindow;
+	float3                  mLightDirection = float3(0.2f, 0.8f, 0.1f);
 
 #if USE_DENOISER
-	Buffer*					pDenoiserInputsUniformBuffer[gImageCount];
-	Texture*				pAlbedoTexture;
-	DescriptorSet*			pDenoiserInputsDescriptorSet;
-	RenderTarget*			pDepthNormalRenderTarget[2];
-	RenderTarget*			pMotionVectorRenderTarget;
-	RenderTarget*			pDepthRenderTarget;
-	RootSignature*			pDenoiserInputsRootSignature;
-	Shader*		 			pDenoiserInputsShader;
-	Pipeline*				pDenoiserInputsPipeline;
-	SSVGFDenoiser*			pDenoiser;
+	Buffer*                 pDenoiserInputsUniformBuffer[gImageCount];
+	Texture*                pAlbedoTexture;
+	DescriptorSet*          pDenoiserInputsDescriptorSet;
+	RenderTarget*           pDepthNormalRenderTarget[2];
+	RenderTarget*           pMotionVectorRenderTarget;
+	RenderTarget*           pDepthRenderTarget;
+	RootSignature*          pDenoiserInputsRootSignature;
+	Shader*                 pDenoiserInputsShader;
+	Pipeline*               pDenoiserInputsPipeline;
+	SSVGFDenoiser*          pDenoiser;
 #endif
 };
 

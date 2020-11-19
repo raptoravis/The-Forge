@@ -9,9 +9,9 @@ The Forge is a cross-platform rendering framework supporting
   * Linux Ubuntu 18.04 LTS with Vulkan 1.1 and RTX Ray Tracing API
 - Android Pie with Vulkan 1.1
 - macOS / iOS / iPad OS with Metal 2.2
-- XBOX One / XBOX One X (only available for accredited developers on request)
+- XBOX One / XBOX One X / XBOX Series X (only available for accredited developers on request)
 - PS4 / PS4 Pro (only available for accredited developers on request)
-- PS5 (in development) (only available for accredited developers on request)
+- PS5 (only available for accredited developers on request)
 - Switch (only available for accredited developers on request)
 - Google Stadia (in development) (only available for accredited developers on request)
 
@@ -55,6 +55,116 @@ The Forge Interactive Inc. is a [Khronos member](https://www.khronos.org/members
 * macOS [![Build Status](https://travis-ci.org/ConfettiFX/The-Forge.svg?branch=master)](https://travis-ci.org/ConfettiFX/The-Forge)
 
 # News
+
+
+## Release 1.46 - October 1st, 2020 - Supergiant's Hades | Windows Management | AMD FX Stochastic SS Reflection
+* [Supergiant's Hades](https://www.supergiantgames.com/games/hades/) we are working with Supergiant since 2014. One of the on-going challenges was that their run-time was written in C#. At the beginning of last year, we suggested to help them in building a new cross-platform game engine in C/C++ from scratch with The Forge. The project started in April 2019 and the first version of this new engine launched in May this year. Hades was then released for Microsoft Windows, macOS, and Nintendo Switch on September 17, 2020. The game can run on all platforms supported by The Forge.
+
+Here is a screenshot of Hades running on Switch:
+
+![Supergiant Hades](Screenshots/Supergiant_Hades.jpg)
+
+Here is an article by [Forbes](https://www.forbes.com/sites/davidthier/2020/09/27/you-need-to-play-the-game-at-the-top-of-the-nintendo-switch-charts/#6e9128ba2f80) about Hades being at the top of the Nintendo Switch Charts.
+Hades is also a technology showcase for Intel's integrated GPUs on macOS and Windows. The target group of the game seems to often own those GPUs.
+
+* Windows management: there is a new functional test named 32_Window that demonstrates windows management on Windows, Linux and macOS. 
+  * The window layout, position, and size are now driven by the client dimensions, meaning that
+the values that the client demands are the exact values the client area will be represented with, regardless of the window style. This allows for much greater flexibility
+and consistency, especially when working with a fullscreen window. 
+  * Multi-monitor support has also been improved significantly, offering smooth consistent transitions between client displays and guaranteeing correct window behavior and data retention. Media layer functionality has been expanded, allowing the client to control mouse positioning, mouse visibility, and mouse visual representation. 
+  * It is now possible to create independent mouse cursors to further customize the application.
+
+Here are the screenshots:
+
+Windows:
+![Windows Management for Windows](Screenshots/32_Window_Win.png)
+
+macOS:
+![Windows Management for macOS](Screenshots/32_Window_macOS.png)
+
+Linux:
+![Windows Management for Linux](Screenshots/32_Window_Linux.jpg)
+
+* Screen-Space reflections: we renamed the functional test "10_PixelProjectedReflections" to 10_ScreenSpaceReflections. You have now two choices: you can pick either Pixel Projected Reflections or AMD's FX Stochastic Screen Space Reflection. We just made AMD's FX code cross-platform. It runs now on Windows, Linux, macOS, Switch, PS and XBOX.
+
+Here are the screenshots:
+
+Windows final scene:
+![AMD FX Stochastic Screen Space Reflections](Screenshots/SSSR/SSSR_Scene_with_reflections.png)
+
+Without denoising:
+![AMD FX Stochastic Screen Space Reflections before denoise](Screenshots/SSSR/SSSR_Reflections_only_defore_denoise.png)
+
+With denoising:
+![AMD FX Stochastic Screen Space Reflections before denoise](Screenshots/SSSR/SSSR_Reflections_with_denoise.png)
+
+PS4:
+![AMD FX Stochastic Screen Space Reflections on PS4](Screenshots/SSSR/SSSR_on_PS4.png)
+
+macOS:
+![AMD FX Stochastic Screen Space Reflections on macOS](Screenshots/SSSR/SSSR_on_macOS.png)
+
+* Resolved GitHub issues:
+  * Issue #183 - VERTEX_ATTRIB_RATE_INSTANCE ignored on macOS 10.12, iOS 10.0
+
+
+
+## Release 1.45 - August 6th, 2020 - TressFX | File System Rewrite
+* TressFX: we upgraded TressFX a bit and retuned the lighting. 
+
+Here are the screenshots:
+![Black hair](Screenshots/TressFX/black_new.png) 
+
+![Blond hair](Screenshots/TressFX/blone_new.png) 
+
+![Brown hair](Screenshots/TressFX/brown_new.png) 
+
+![Red hair](Screenshots/TressFX/red_new.png) 
+
+* File system: our old file system was designed more for tools or Windows applications than for games. It consumed more memory than the whole rendering system and used Windows file methods extensively. That is the opposite of what you want in a game. It took us now several months to correct the mistake and come up with a file system that is tailored towards games. That means that the interface changed substantially. Thanks to all those who pointed this out. Sometimes it takes a couple of iterations to land on a design that is efficient.
+If you look at the new interface there are still path related functions in there. They will be removed step-by-step.
+Please check out the new file system interface and let us know what you think.
+
+* Android Vulkan: validation layer is now supported
+
+
+## Release 1.44 - July 16th, 2020 - Android | Linux
+* Mobile Devices: DPI scaling is properly handled now so we shouldn't see messed up UI anymore on mobile devices
+* Android: the following Unit-tests are now included for Android:
+    * 03_MultiThread
+![03_MultiThread](Screenshots/Android/03_MultiThread.png) 
+    * 04_ExecuteIndirect
+![04_ExecuteIndirect](Screenshots/Android/04_ExecuteIndirect.JPEG)
+    * 07_Tesselation
+![07_Tesselation](Screenshots/Android/07_Tesselation.JPEG)
+    * 10_PixelProjectedReflections
+![10_PixelProjectedReflections](Screenshots/Android/10_PixelProjectedReflections.png)
+    * 12_ZipFileSystem
+![12_ZipFileSystem](Screenshots/Android/12_ZipFileSystem.png)
+    * 13_UserInterface
+![13_UserInterface](Screenshots/Android/13_UserInterface.JPEG)
+    * 14_WaveIntrinsics
+![14_WaveIntrinsics](Screenshots/Android/14_WaveIntrinsics.jpg)
+    * 15_Transparency
+![15_Transparency](Screenshots/Android/15_Transparency.png)
+* gamepad support: tested with PS4 controller
+* sample size reduction
+* proper closing of apps with the back button
+* proper handling of vSync
+* .zip filesystem handling
+* shader compile #include directive support
+* overall stability improvements
+* improved swapchain creation process and proper handling of current frame index
+
+
+* Linux:
+  * Window management is improved
+  * Borderless fullscreen is supported
+  * Implemented full screen toggle (usually alt-enter)
+  * Cursor position is now correct
+  * Camera movement with mouse now works properly
+  * Resources are freed properly
+
 
 ## Release 1.43 - May 22nd, 2020 - MTuner | macOS / iOS run-time
 * Filesystem: it turns out the file system is still confusing and not intuitive. It mixes up several concepts but is not consistent and somehow favors Windows folder naming conventions, that do not exist in most of our target platforms. We did a slight first step with this release. We need to make a deeper change with the next release.
@@ -215,24 +325,29 @@ We are currently testing on:
 
 1. Android Phone with Android Pie (9.x) for Vulkan 1.1 support
 
-2. Visual Studio 2017 with support for Android API level 28
+2. Visual Studio 2019 (Visual Studio 2017 works too but has a bug in the build module) 
 
-At the moment, the Android run-time does not support the following unit tests due to -what we consider- driver bugs:
-* 04_ExecuteIndirect
-* 07_Tesselation 
+3. Android API level 28 or higher
+
+We can't use Android SDK < 26 due to 
+
+```
+#if _ANDROID_API_ >= 26
+int pthread_getname_np(pthread_t _pthread, char* _buf, size_t _n) _INTRODUCED_IN(26);
+#endif / _ANDROID_API_ >= 26 /
+```
+
+At the moment, the Android run-time does not support the following unit tests due to -what we consider- driver bugs or lack of support:
 * 08_Procedural
 * 09a_HybridRayTracing
-* 10_PixelProjectedReflections
-* 12_RendererRuntimeSwitch
-* 14_WaveIntrinsics
-* 15_Transparency 
 * 16_RayTracing 
 * 16a_SphereTracing
 * Visibility Buffer 
 
-3. We are currently testing on 
+4. We are currently testing on 
 * [Samsung S10 Galaxy (Qualcomm Adreno 640 Graphics Cardv(Vulkan 1.1.87))](https://www.samsung.com/us/mobile/galaxy-s10/) with Android 9.0. Please note this is the version with the Qualcomm based chipset.
-* [Essential Phone](https://en.wikipedia.org/wiki/Essential_Phone) with Android 9.0 - Build PPR1.181005.034
+* [Essential Phone](https://en.wikipedia.org/wiki/Essential_Phone) (Vulkan 1.1.87) with Android 9.0 - Build PPR1.181005.034
+* [Oneplus 6T](https://www.oneplus.com/oneplus-6t-tmo) (Vulkan API 1.1.87) GPU Adreno 630. Driver version 512.408.0 with Android 10.0
 
 
 
@@ -570,11 +685,11 @@ Based on request we are providing a Ray Tracing Benchmark in 16_RayTracing. It a
 
 Windows DirectX 12 DXR, GeForce RTX 2070 Super, 3840x1600, NVIDIA Driver 441.99
 
-![Windows DXR output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile_DX.png) 
+![Windows DXR output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile_DX.PNG) 
 
 Windows Vulkan RTX, GeForce RTX 2070 Super, 3840x1600, NVIDIA Driver 441.99
 
-![Windows RTX output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile.png) 
+![Windows RTX output of Ray Tracing Benchmark](Screenshots/16_Path_Tracer_Profile.PNG) 
 
 
 ## Microprofiler
@@ -614,6 +729,17 @@ Confetti will prepare releases when all the platforms are stable and running and
 
 # Products
 We would appreciate it if you could send us a link in case your product uses The Forge. Here are the ones we received so far:
+
+## Supergiant Games Hades
+[Supergiant's Hades](https://www.supergiantgames.com/games/hades/) we are working with Supergiant since 2014. One of the on-going challenges was that their run-time was written in C#. At the beginning of last year, we suggested to help them in building a new cross-platform game engine in C/C++ from scratch with The Forge. The project started in April 2019 and the first version of this new engine launched in May this year. Hades was then released for Microsoft Windows, macOS, and Nintendo Switch on September 17, 2020. The game can run on all platforms supported by The Forge.
+
+Here is a screenshot of Hades running on Switch:
+
+![Supergiant Hades](Screenshots/Supergiant_Hades.jpg)
+
+Here is an article by [Forbes](https://www.forbes.com/sites/davidthier/2020/09/27/you-need-to-play-the-game-at-the-top-of-the-nintendo-switch-charts/#6e9128ba2f80) about Hades being at the top of the Nintendo Switch Charts.
+Hades is also a technology showcase for Intel's integrated GPUs on macOS and Windows. The target group of the game seems to often own those GPUs.
+
 
 ## StarVR One SDK
 The Forge is used to build the StarVR One SDK:

@@ -52,8 +52,8 @@ ProfileToken   gGpuProfileToken;
 Renderer* pRenderer = NULL;
 
 Queue*   pGraphicsQueue = NULL;
-CmdPool* pCmdPool = NULL;
-Cmd**    ppCmds = NULL;
+CmdPool* pCmdPools[gImageCount];
+Cmd*     pCmds[gImageCount];
 
 SwapChain* pSwapChain = NULL;
 Fence*     pRenderCompleteFences[gImageCount] = { NULL };
@@ -91,21 +91,13 @@ class SphereTracing: public IApp
 	
 	bool Init()
 	{
-        // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/16a_SphereTracing");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../UnitTestResources/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,          "../../UnitTestResources/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,    "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,      "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,  "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,    "../../../../Middleware_3/UI");
-        }
-        
+		// FILE PATHS
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES, "Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES, "CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG, "GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES, "Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS, "Fonts");
+
 		// window and renderer setup
 		RendererDesc settings = { 0 };
 		initRenderer(GetName(), &settings, &pRenderer);
@@ -117,12 +109,15 @@ class SphereTracing: public IApp
 		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pGraphicsQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -136,21 +131,21 @@ class SphereTracing: public IApp
     if (!gAppUI.Init(pRenderer))
       return false;
 
-    gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+    gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 
 		initProfiler();
 
         gGpuProfileToken = addGpuProfiler(pRenderer, pGraphicsQueue, "Graphics");
 
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 		{
 			LOGF(LogLevel::eERROR, "Could not initialize Virtual Joystick.");
 			return false;
 		}
 
 		ShaderLoadDesc rtDemoShader = {};
-		rtDemoShader.mStages[0] = { "fstri.vert", NULL, 0, RD_SHADER_SOURCES };
-		rtDemoShader.mStages[1] = { "rt.frag", NULL, 0, RD_SHADER_SOURCES };
+		rtDemoShader.mStages[0] = { "fstri.vert", NULL, 0 };
+		rtDemoShader.mStages[1] = { "rt.frag", NULL, 0 };
 
 		addShader(pRenderer, &rtDemoShader, &pRTDemoShader);
 
@@ -172,7 +167,7 @@ class SphereTracing: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pUniformBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 		/************************************************************************/
 		// GUI
@@ -264,8 +259,11 @@ class SphereTracing: public IApp
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
 
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
 
 		
 		exitResourceLoaderInterface(pRenderer);
@@ -331,7 +329,7 @@ class SphereTracing: public IApp
 		/************************************************************************/
 		// Scene Update
 		/************************************************************************/
-		gUniformData.res = vec4((float)mSettings.mWidth, (float)mSettings.mHeight, 0.0f, 0.0f);
+		gUniformData.res = vec4(float(mSettings.mWidth), float(mSettings.mHeight), 0.0f, 0.0f);
 		mat4 viewMat = pCameraController->getViewMatrix();
 		gUniformData.invView = inverse(viewMat);
 
@@ -343,7 +341,8 @@ class SphereTracing: public IApp
 
 	void Draw()
 	{
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &gFrameIndex);
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
 
 		// Stall if CPU is running "Swap Chain Buffer Count" frames ahead of GPU
 		Fence*      pNextFence = pRenderCompleteFences[gFrameIndex];
@@ -352,13 +351,15 @@ class SphereTracing: public IApp
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pNextFence);
 
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
+
 		// Update uniform buffers
 		BufferUpdateDesc shaderCbv = { pUniformBuffer[gFrameIndex] };
 		beginUpdateResource(&shaderCbv);
 		*(UniformBlock*)shaderCbv.pMappedData = gUniformData;
 		endUpdateResource(&shaderCbv, NULL);
 
-		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[gFrameIndex];
+		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 
 		Semaphore* pRenderCompleteSemaphore = pRenderCompleteSemaphores[gFrameIndex];
 		Fence*     pRenderCompleteFence = pRenderCompleteFences[gFrameIndex];
@@ -372,13 +373,13 @@ class SphereTracing: public IApp
 		loadActions.mClearColorValues[0].a = 0.0f;
 		loadActions.mLoadActionDepth = LOAD_ACTION_DONTCARE;
 
-		Cmd* cmd = ppCmds[gFrameIndex];
+		Cmd* cmd = pCmds[gFrameIndex];
 		beginCmd(cmd);
 
 		cmdBeginGpuFrameProfile(cmd, gGpuProfileToken);
 
 		RenderTargetBarrier barriers[] = {
-			{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
+			{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
 		};
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 
@@ -399,10 +400,10 @@ class SphereTracing: public IApp
 
 		gVirtualJoystick.Draw(cmd, { 1.0f, 1.0f, 1.0f, 1.0f });
 
-        cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
+        float2 txtSize = cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
 
 #if !defined(__ANDROID__)    // Metal doesn't support GPU profilers
-		cmdDrawGpuProfile(cmd, float2(8, 40), gGpuProfileToken, &gFrameTimeDraw);
+		cmdDrawGpuProfile(cmd, float2(8.f, txtSize.y + 30.f), gGpuProfileToken, &gFrameTimeDraw);
 #endif
 
 		cmdDrawProfilerUI();
@@ -411,7 +412,7 @@ class SphereTracing: public IApp
 		cmdBindRenderTargets(cmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 		cmdEndDebugMarker(cmd);
 
-		barriers[0] = { pRenderTarget, RESOURCE_STATE_PRESENT };
+		barriers[0] = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 		cmdEndGpuFrameProfile(cmd, gGpuProfileToken);
 		endCmd(cmd);
@@ -426,13 +427,15 @@ class SphereTracing: public IApp
 		submitDesc.pSignalFence = pRenderCompleteFence;
 		queueSubmit(pGraphicsQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = gFrameIndex;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
 		presentDesc.pSwapChain = pSwapChain;
 		presentDesc.mSubmitDone = true;
 		queuePresent(pGraphicsQueue, &presentDesc);
 		flipProfiler();
+
+		gFrameIndex = (gFrameIndex + 1) % gImageCount;
 	}
 
 	const char* GetName() { return "16a_SphereTracing"; }
@@ -447,8 +450,7 @@ class SphereTracing: public IApp
 		swapChainDesc.mHeight = mSettings.mHeight;
 		swapChainDesc.mImageCount = gImageCount;
 		swapChainDesc.mColorFormat = getRecommendedSwapchainFormat(true);
-		swapChainDesc.mEnableVsync = false;
-
+		swapChainDesc.mEnableVsync = mSettings.mDefaultVSyncEnabled;
 		::addSwapChain(pRenderer, &swapChainDesc, &pSwapChain);
 
 		return pSwapChain != NULL;

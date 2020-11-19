@@ -24,7 +24,7 @@ namespace eastl
 #include "Shaders/Metal/Shader_Defs.h"
 #include "Shaders/Metal/ASMConstant.h"
 #include "Shaders/Metal/SDF_Constant.h"
-#elif defined(DIRECT3D12) || defined(_DURANGO)
+#elif defined(DIRECT3D12) || defined(XBOX)
 #define NO_HLSL_DEFINITIONS
 #include "Shaders/D3D12/Shader_Defs.h"
 #include "Shaders/D3D12/ASMShader_Defs.h"
@@ -39,6 +39,11 @@ namespace eastl
 #include "../../../../PS4/Examples_3/Unit_Tests/src/09_LightShadowPlayground/Shaders/Shader_Defs.h"
 #include "../../../../PS4/Examples_3/Unit_Tests/src/09_LightShadowPlayground/Shaders/ASMShader_Defs.h"
 #include "../../../../PS4/Examples_3/Unit_Tests/src/09_LightShadowPlayground/Shaders/SDF_Constant.h"
+#elif defined(PROSPERO)
+#define NO_PROSPERO_DEFINITIONS
+#include "../../../../Prospero/Examples_3/Unit_Tests/src/09_LightShadowPlayground/Shaders/Shader_Defs.h"
+#include "../../../../Prospero/Examples_3/Unit_Tests/src/09_LightShadowPlayground/Shaders/ASMShader_Defs.h"
+#include "../../../../Prospero/Examples_3/Unit_Tests/src/09_LightShadowPlayground/Shaders/SDF_Constant.h"
 #endif
 
 
@@ -187,7 +192,7 @@ struct Vertex
 };
 
 
-typedef bool (*GenerateVolumeDataFromFileFunc) (SDFVolumeData**, const Path*, const eastl::string&, float);
+typedef bool (*GenerateVolumeDataFromFileFunc) (SDFVolumeData**, const eastl::string&, float);
 
 
 void adjustAABB(AABB* ownerAABB, const vec3& point);
@@ -199,19 +204,19 @@ vec3 calculateAABBCenter(const AABB* ownerAABB);
 void alignAABB(AABB* ownerAABB, float alignment);
 
 void destroyClusters(ClusterContainer* pMesh);
-Scene* loadScene(const Path* fileName, struct SyncToken* token, float scale, float offsetX, float offsetY, float offsetZ);
+Scene* loadScene(const char* fileName, SyncToken* token, float scale, float offsetX, float offsetY, float offsetZ);
 	
 void   removeScene(Scene* scene);
 
 void   createClusters(bool twoSided, const Scene* scene, IndirectDrawIndexArguments* draw, ClusterContainer* subMesh);
 
 
-void loadSDFMeshAlphaTested(ThreadSystem* threadSystem, const Path* filePath, SDFMesh* outMesh, float scale,
+void loadSDFMeshAlphaTested(ThreadSystem* threadSystem, const char* fileName, SDFMesh* outMesh, float scale,
 	float offsetX, bool generateSDFVolumeData,
 	BakedSDFVolumeInstances& sdfMeshInstances, 
 	GenerateVolumeDataFromFileFunc generateVolumeDataFromFileFunc);
 
-void loadSDFMesh(ThreadSystem* threadSystem, const Path* filePath, SDFMesh* outMesh, float scale,
+void loadSDFMesh(ThreadSystem* threadSystem, const char* fileName, SDFMesh* outMesh, float scale,
 	float offsetX, bool generateSDFVolumeData, BakedSDFVolumeInstances& sdfMeshInstances,
 	GenerateVolumeDataFromFileFunc generateVolumeDataFromFileFunc);
 

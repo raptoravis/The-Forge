@@ -81,8 +81,8 @@ const float    gRotOrbitZScale = 0.00001f;
 Renderer* pRenderer = NULL;
 
 Queue*   pGraphicsQueue = NULL;
-CmdPool* pCmdPool = NULL;
-Cmd**    ppCmds = NULL;
+CmdPool* pCmdPools[gImageCount] = { NULL };
+Cmd*     pCmds[gImageCount] = { NULL };
 
 SwapChain*    pSwapChain = NULL;
 RenderTarget* pDepthBuffer = NULL;
@@ -110,12 +110,15 @@ Buffer* pSkyboxUniformBuffer[gImageCount] = { NULL };
 uint32_t gFrameIndex = 0;
 ProfileToken gGpuProfileToken = PROFILE_INVALID_TOKEN;
 
+bool			 bToggleVSync = false;
 int              gNumberOfSpherePoints;
 UniformBlock     gUniformData;
 UniformBlock     gUniformDataSky;
 PlanetInfoStruct gPlanetInfoData[gNumPlanets];
 
 ICameraController* pCameraController = NULL;
+
+GuiComponent* pGuiWindow;
 
 /// UI
 UIApp gAppUI;
@@ -128,23 +131,20 @@ TextDrawDesc gFrameTimeDraw = TextDrawDesc(0, 0xff00ffff, 18);
 class Transformations: public IApp
 {
 public:
+	Transformations()
+	{
+		bToggleVSync = mSettings.mDefaultVSyncEnabled;
+	}
+
 	bool Init()
 	{
-        // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/01_Transformations");
-            fsSetResourceDirRootPath(resourceDirRoot);
+		// FILE PATHS
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES, "Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES, "CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG, "GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES, "Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS, "Fonts");
 
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,         "../../UnitTestResources/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,           "../../UnitTestResources/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,    "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,       "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,  "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,    "../../../../Middleware_3/UI");
-        }
-        
 		// window and renderer setup
 		RendererDesc settings = { 0 };
 
@@ -159,15 +159,16 @@ public:
 		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pGraphicsQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+
 			addFence(pRenderer, &pRenderCompleteFences[i]);
 			addSemaphore(pRenderer, &pRenderCompleteSemaphores[i]);
 		}
@@ -178,25 +179,24 @@ public:
 		// Loads Skybox Textures
 		for (int i = 0; i < 6; ++i)
 		{
-            PathHandle textureFilePath = fsGetPathInResourceDirEnum(RD_TEXTURES, pSkyBoxImageFileNames[i]);
 			TextureLoadDesc textureDesc = {};
-			textureDesc.pFilePath = textureFilePath;
+			textureDesc.pFileName = pSkyBoxImageFileNames[i];
 			textureDesc.ppTexture = &pSkyBoxTextures[i];
-			addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&textureDesc, NULL);
 		}
 
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 		{
 			LOGF(LogLevel::eERROR, "Could not initialize Virtual Joystick.");
 			return false;
 		}
 
 		ShaderLoadDesc skyShader = {};
-		skyShader.mStages[0] = { "skybox.vert", NULL, 0, RD_SHADER_SOURCES };
-		skyShader.mStages[1] = { "skybox.frag", NULL, 0, RD_SHADER_SOURCES };
+		skyShader.mStages[0] = { "skybox.vert", NULL, 0};
+		skyShader.mStages[1] = { "skybox.frag", NULL, 0};
 		ShaderLoadDesc basicShader = {};
-		basicShader.mStages[0] = { "basic.vert", NULL, 0, RD_SHADER_SOURCES };
-		basicShader.mStages[1] = { "basic.frag", NULL, 0, RD_SHADER_SOURCES };
+		basicShader.mStages[0] = { "basic.vert", NULL, 0};
+		basicShader.mStages[1] = { "basic.frag", NULL, 0};
 
 		addShader(pRenderer, &skyShader, &pSkyBoxDrawShader);
 		addShader(pRenderer, &basicShader, &pSphereShader);
@@ -235,7 +235,7 @@ public:
 		sphereVbDesc.mDesc.mSize = sphereDataSize;
 		sphereVbDesc.pData = pSpherePoints;
 		sphereVbDesc.ppBuffer = &pSphereVertexBuffer;
-		addResource(&sphereVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&sphereVbDesc, NULL);
 
 		//Generate sky box vertex buffer
 		float skyBoxPoints[] = {
@@ -271,7 +271,7 @@ public:
 		skyboxVbDesc.mDesc.mSize = skyBoxDataSize;
 		skyboxVbDesc.pData = skyBoxPoints;
 		skyboxVbDesc.ppBuffer = &pSkyBoxVertexBuffer;
-		addResource(&skyboxVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&skyboxVbDesc, NULL);
 
 		BufferLoadDesc ubDesc = {};
 		ubDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -282,9 +282,9 @@ public:
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pProjViewUniformBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 			ubDesc.ppBuffer = &pSkyboxUniformBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 
 		// Setup planets (Rotation speeds are relative to Earth's, some values randomly given)
@@ -391,7 +391,7 @@ public:
 		if (!gAppUI.Init(pRenderer))
 			return false;
 
-		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 
 		CameraMotionParameters cmp{ 160.0f, 600.0f, 200.0f };
 		vec3                   camPos{ 48.0f, 48.0f, 20.0f };
@@ -409,6 +409,16 @@ public:
     
         // Gpu profiler can only be added after initProfile.
         gGpuProfileToken = addGpuProfiler(pRenderer, pGraphicsQueue, "Graphics");
+
+		/************************************************************************/
+		// GUI
+		/************************************************************************/
+		GuiDesc guiDesc = {};		
+		guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.2f);
+		pGuiWindow = gAppUI.AddGuiComponent(GetName(), &guiDesc);
+#if !defined(TARGET_IOS)
+		pGuiWindow->AddWidget(CheckboxWidget("Toggle VSync\t\t\t\t\t", &bToggleVSync));
+#endif
 
 		// App Actions
         InputActionDesc actionDesc = { InputBindings::BUTTON_DUMP, [](InputActionContext* ctx) {  dumpProfileData(((Renderer*)ctx->pUserData), ((Renderer*)ctx->pUserData)->pName); return true; }, pRenderer };
@@ -447,7 +457,7 @@ public:
 		waitForAllResourceLoads();
 
 		// Need to free memory;
-		conf_free(pSpherePoints);
+		tf_free(pSpherePoints);
 		
 		// Prepare descriptor sets
 		DescriptorData params[6] = {};
@@ -519,11 +529,11 @@ public:
 		{
 			removeFence(pRenderer, pRenderCompleteFences[i]);
 			removeSemaphore(pRenderer, pRenderCompleteSemaphores[i]);
+
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
-
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
 
 		exitResourceLoaderInterface(pRenderer);
 		removeQueue(pRenderer, pGraphicsQueue);
@@ -538,7 +548,7 @@ public:
 		if (!addDepthBuffer())
 			return false;
 
-		if (!gAppUI.Load(pSwapChain->ppRenderTargets))
+		if (!gAppUI.Load(pSwapChain->ppRenderTargets, 1))
 			return false;
 
 		if (!gVirtualJoystick.Load(pSwapChain->ppRenderTargets[0]))
@@ -622,6 +632,15 @@ public:
 
 	void Update(float deltaTime)
 	{
+#if !defined(TARGET_IOS)
+		if (pSwapChain->mEnableVsync != bToggleVSync)
+		{
+			waitQueueIdle(pGraphicsQueue);
+			gFrameIndex = 0;
+			::toggleVSync(pRenderer, &pSwapChain);
+		}
+#endif
+
 		updateInputSystem(mSettings.mWidth, mSettings.mHeight);
 
 		pCameraController->update(deltaTime);
@@ -672,14 +691,15 @@ public:
         /************************************************************************/
         // Update GUI
         /************************************************************************/
-        gAppUI.Update(deltaTime);  
+        gAppUI.Update(deltaTime);
 	}
 
 	void Draw()
 	{
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &gFrameIndex);
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
 
-		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[gFrameIndex];
+		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		Semaphore*    pRenderCompleteSemaphore = pRenderCompleteSemaphores[gFrameIndex];
 		Fence*        pRenderCompleteFence = pRenderCompleteFences[gFrameIndex];
 
@@ -700,24 +720,22 @@ public:
 		*(UniformBlock*)skyboxViewProjCbv.pMappedData = gUniformDataSky;
 		endUpdateResource(&skyboxViewProjCbv, NULL);
 
-		Cmd* cmd = ppCmds[gFrameIndex];
+		// Reset cmd pool for this frame
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
+
+		Cmd* cmd = pCmds[gFrameIndex];
 		beginCmd(cmd);
 
 		cmdBeginGpuFrameProfile(cmd, gGpuProfileToken);
 
 		RenderTargetBarrier barriers[] = {
-			{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
-			{ pDepthBuffer, RESOURCE_STATE_DEPTH_WRITE },
+			{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
 		};
-		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
+		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 
 		// simply record the screen cleaning command
 		LoadActionsDesc loadActions = {};
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
-		loadActions.mClearColorValues[0].r = 1.0f;
-		loadActions.mClearColorValues[0].g = 1.0f;
-		loadActions.mClearColorValues[0].b = 0.0f;
-		loadActions.mClearColorValues[0].a = 0.0f;
 		loadActions.mLoadActionDepth = LOAD_ACTION_CLEAR;
 		loadActions.mClearDepth.depth = 0.0f;
 		loadActions.mClearDepth.stencil = 0;
@@ -729,12 +747,14 @@ public:
 		const uint32_t skyboxVbStride = sizeof(float) * 4;
 
 		// draw skybox
-		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw skybox");
+		cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw Skybox");
+		cmdSetViewport(cmd, 0.0f, 0.0f, (float)pRenderTarget->mWidth, (float)pRenderTarget->mHeight, 1.0f, 1.0f);
 		cmdBindPipeline(cmd, pSkyBoxDrawPipeline);
 		cmdBindDescriptorSet(cmd, 0, pDescriptorSetTexture);
 		cmdBindDescriptorSet(cmd, gFrameIndex * 2 + 0, pDescriptorSetUniforms);
 		cmdBindVertexBuffer(cmd, 1, &pSkyBoxVertexBuffer, &skyboxVbStride, NULL);
 		cmdDraw(cmd, 36, 0);
+		cmdSetViewport(cmd, 0.0f, 0.0f, (float)pRenderTarget->mWidth, (float)pRenderTarget->mHeight, 0.0f, 1.0f);
 		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
 		////// draw planets
@@ -752,19 +772,21 @@ public:
     cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw UI");
 
 		gVirtualJoystick.Draw(cmd, { 1.0f, 1.0f, 1.0f, 1.0f });
-
-        cmdDrawCpuProfile(cmd, float2(8, 15), &gFrameTimeDraw);
-#if !defined(__ANDROID__)
-    cmdDrawGpuProfile(cmd, float2(8, 40), gGpuProfileToken, &gFrameTimeDraw);
-#endif
+				
+		const float txtIndent = 8.f;
+		float2 txtSizePx = cmdDrawCpuProfile(cmd, float2(txtIndent, 15.f), &gFrameTimeDraw);
+		cmdDrawGpuProfile(cmd, float2(txtIndent, txtSizePx.y + 30.f), gGpuProfileToken, &gFrameTimeDraw);
+		
+		
 
     cmdDrawProfilerUI();
 
+		gAppUI.Gui(pGuiWindow);
 		gAppUI.Draw(cmd);
 		cmdBindRenderTargets(cmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
     cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
-		barriers[0] = { pRenderTarget, RESOURCE_STATE_PRESENT };
+		barriers[0] = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 
     cmdEndGpuFrameProfile(cmd, gGpuProfileToken);
@@ -780,13 +802,15 @@ public:
 		submitDesc.pSignalFence = pRenderCompleteFence;
 		queueSubmit(pGraphicsQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = gFrameIndex;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.pSwapChain = pSwapChain;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
 		presentDesc.mSubmitDone = true;
 		queuePresent(pGraphicsQueue, &presentDesc);
 		flipProfiler();
+
+		gFrameIndex = (gFrameIndex + 1) % gImageCount;
 	}
 
 	const char* GetName() { return "01_Transformations"; }
@@ -801,7 +825,7 @@ public:
 		swapChainDesc.mHeight = mSettings.mHeight;
 		swapChainDesc.mImageCount = gImageCount;
 		swapChainDesc.mColorFormat = getRecommendedSwapchainFormat(true);
-		swapChainDesc.mEnableVsync = false;
+		swapChainDesc.mEnableVsync = mSettings.mDefaultVSyncEnabled;
 		::addSwapChain(pRenderer, &swapChainDesc, &pSwapChain);
 
 		return pSwapChain != NULL;
@@ -816,6 +840,7 @@ public:
 		depthRT.mClearValue.stencil = 0;
 		depthRT.mDepth = 1;
 		depthRT.mFormat = TinyImageFormat_D32_SFLOAT;
+		depthRT.mStartState = RESOURCE_STATE_DEPTH_WRITE;
 		depthRT.mHeight = mSettings.mHeight;
 		depthRT.mSampleCount = SAMPLE_COUNT_1;
 		depthRT.mSampleQuality = 0;
@@ -826,4 +851,5 @@ public:
 		return pDepthBuffer != NULL;
 	}
 };
+
 DEFINE_APPLICATION_MAIN(Transformations)

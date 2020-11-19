@@ -25,6 +25,7 @@
 #include "../../../../Common_3/ThirdParty/OpenSource/EASTL/vector.h"
 #include "../../../../Common_3/ThirdParty/OpenSource/EASTL/string.h"
 #include "../../../../Common_3/ThirdParty/OpenSource/EASTL/unordered_map.h"
+#include "../../../../Common_3/ThirdParty/OpenSource/EASTL/sort.h"
 
 //Interfaces
 #include "../../../../Common_3/OS/Interfaces/ICameraController.h"
@@ -55,6 +56,19 @@ const uint32_t		gImageCount					= 3;
 const uint32_t		gLightCount					= 3;
 const uint32_t		gTotalLightCount			= gLightCount + 1;
 
+static const char* pModelNames[]				=
+{
+	"Lantern.gltf",
+	"FlightHelmet.gltf",
+	"capsule.gltf",
+	"cube.gltf",
+	"lion.gltf",
+	"matBall.gltf"
+};
+static const uint32_t gModelValues[]			= { 0, 1, 2, 3, 4, 5 };
+static uint32_t mModelSelected					= 0;
+static const uint32_t mModelCount				= 6;
+
 // Model Quantization Settings
 int					gCurrentLod					= 0;
 int					gMaxLod						= 5;
@@ -77,11 +91,6 @@ Texture*			pTextureBlack = NULL;
 #else
 #define SHADOWMAP_RES 2048u
 #endif
-
-#if !defined(TARGET_IOS) && !defined(__ANDROID__) && !defined(ORBIS)
-#define USE_BASIS 1
-#endif
-
 //--------------------------------------------------------------------------------------------
 // STRUCT DEFINTIONS
 //--------------------------------------------------------------------------------------------
@@ -154,7 +163,7 @@ struct GLTFAsset
 	Buffer* pMaterialBuffer = NULL;
 	Sampler* pDefaultSampler = NULL;
 	
-	void Init(const Path* path, Renderer* renderer, Sampler* defaultSampler)
+	void Init(Renderer* renderer, Sampler* defaultSampler)
 	{
 		pRenderer = renderer;
 		pDefaultSampler = defaultSampler;
@@ -166,7 +175,7 @@ struct GLTFAsset
 		mTextures.resize(pData->pHandle->images_count);
 		SyncToken token = {};
 		for (uint32_t i = 0; i < pData->pHandle->images_count; ++i)
-			gltfLoadTextureAtIndex(pData, path, i, false, &token, &mTextures[i]);
+			gltfLoadTextureAtIndex(pData, i, false, &token, TEXTURE_CONTAINER_BASIS, &mTextures[i]);
 
 		if (pData->mNodeCount)
 			createNodeTransformsBuffer();
@@ -263,9 +272,9 @@ struct GLTFAsset
 		nodeTransformsBufferLoadDesc.mDesc.mElementCount = pData->mNodeCount;
 		nodeTransformsBufferLoadDesc.mDesc.mSize = pData->mNodeCount * sizeof(mat4);
 		nodeTransformsBufferLoadDesc.pData = nodeTransforms;
-		nodeTransformsBufferLoadDesc.mDesc.pDebugName = L"GLTF Node Transforms Buffer";
+		nodeTransformsBufferLoadDesc.mDesc.pName = "GLTF Node Transforms Buffer";
 		nodeTransformsBufferLoadDesc.ppBuffer = &pNodeTransformsBuffer;
-		addResource(&nodeTransformsBufferLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&nodeTransformsBufferLoadDesc, NULL);
 	}
 	
 	void updateTextureProperties(const GLTFTextureView& textureView, GLTFTextureProperties& textureProperties)
@@ -317,9 +326,9 @@ struct GLTFAsset
 		materialBufferLoadDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		materialBufferLoadDesc.mDesc.mStructStride = materialDataStride;
 		materialBufferLoadDesc.mDesc.mSize = pData->mMaterialCount * materialDataStride;
-		materialBufferLoadDesc.mDesc.pDebugName = L"GLTF Materials Buffer";
+		materialBufferLoadDesc.mDesc.pName = "GLTF Materials Buffer";
 		materialBufferLoadDesc.ppBuffer = &pMaterialBuffer;
-		addResource(&materialBufferLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&materialBufferLoadDesc, NULL);
 
 		waitForAllResourceLoads();
 		
@@ -488,7 +497,7 @@ struct GLTFAsset
 
 struct FXAAINFO
 {
-	vec2 ScreenSize;
+	float2 ScreenSize;
 	uint Use;
 	uint padding00;
 };
@@ -500,8 +509,8 @@ Renderer*			pRenderer			= NULL;
 
 Queue*				pGraphicsQueue		= NULL;
 
-CmdPool*			pCmdPool			= NULL;
-Cmd**				ppCmds				= NULL;
+CmdPool*			pCmdPools[gImageCount];
+Cmd*				pCmds[gImageCount];
 
 SwapChain*			pSwapChain			= NULL;
 
@@ -572,19 +581,16 @@ GuiComponent*		pGuiGraphics;
 IWidget*			pSelectLodWidget					= NULL;
 
 UIApp				gAppUI;
-eastl::vector<uint32_t>	gDropDownWidgetData;
-eastl::vector<PathHandle> gModelFiles;
 
-#if defined(__ANDROID__) || defined(__LINUX__)
+#if defined(__ANDROID__) || defined(__linux__) || defined(ORBIS) || defined(PROSPERO)
 uint32_t			modelToLoadIndex					= 0;
 uint32_t			guiModelToLoadIndex					= 0;
 #endif
 
-const wchar_t*		gMissingTextureString				= L"MissingTexture";
+const char*		gMissingTextureString				= "MissingTexture";
 
-const char*                     gDefaultModelFile = "Lantern.gltf";
-PathHandle					    gModelFile;
-PathHandle					    gGuiModelToLoad;
+const char*					    gModelFile;
+uint32_t						gPreviousLoadedModel = mModelSelected;
 
 const uint			gBackroundColor = { 0xb2b2b2ff };
 static uint			gLightColor[gTotalLightCount] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffff66 };
@@ -598,63 +604,56 @@ TextDrawDesc gFrameTimeDraw = TextDrawDesc(0, 0xff00ffff, 18);
 class GLTFViewer : public IApp
 {
 public:
-	GLTFViewer()
-	{
-#ifdef TARGET_IOS
-		mSettings.mContentScaleFactor = 1.f;
-#endif
-	}
-	
 	static bool InitShaderResources()
 	{
 		// shader
 		
 		ShaderLoadDesc FloorShader = {};
 		
-		FloorShader.mStages[0] = { "floor.vert", NULL, 0, RD_SHADER_SOURCES };
+		FloorShader.mStages[0] = { "floor.vert", NULL, 0 };
 
 		addShader(pRenderer, &FloorShader, &pShaderZPass_NonOptimized);
 
 #if defined(__ANDROID__)
-		FloorShader.mStages[1] = { "floorMOBILE.frag", NULL, 0, RD_SHADER_SOURCES };
+		FloorShader.mStages[1] = { "floorMOBILE.frag", NULL, 0 };
 #else
-		FloorShader.mStages[1] = { "floor.frag", NULL, 0, RD_SHADER_SOURCES };
+		FloorShader.mStages[1] = { "floor.frag", NULL, 0 };
 #endif
 		
 		addShader(pRenderer, &FloorShader, &pFloorShader);
 		
 		ShaderLoadDesc MeshOptDemoShader = {};
 		
-		MeshOptDemoShader.mStages[0] = { "basic.vert", NULL, 0, RD_SHADER_SOURCES };
+		MeshOptDemoShader.mStages[0] = { "basic.vert", NULL, 0 };
 
 		addShader(pRenderer, &MeshOptDemoShader, &pShaderZPass);
 
 #if defined(__ANDROID__)
-		MeshOptDemoShader.mStages[1] = { "basicMOBILE.frag", NULL, 0, RD_SHADER_SOURCES };
+		MeshOptDemoShader.mStages[1] = { "basicMOBILE.frag", NULL, 0 };
 #else
-		MeshOptDemoShader.mStages[1] = { "basic.frag", NULL, 0, RD_SHADER_SOURCES };
+		MeshOptDemoShader.mStages[1] = { "basic.frag", NULL, 0 };
 #endif
 		
 		addShader(pRenderer, &MeshOptDemoShader, &pMeshOptDemoShader);
 		
 		ShaderLoadDesc VignetteShader = {};
 		
-		VignetteShader.mStages[0] = { "Triangular.vert", NULL, 0, RD_SHADER_SOURCES };
-		VignetteShader.mStages[1] = { "vignette.frag", NULL, 0, RD_SHADER_SOURCES };
+		VignetteShader.mStages[0] = { "Triangular.vert", NULL, 0 };
+		VignetteShader.mStages[1] = { "vignette.frag", NULL, 0 };
 		
 		addShader(pRenderer, &VignetteShader, &pVignetteShader);
 		
 		ShaderLoadDesc FXAAShader = {};
 		
-		FXAAShader.mStages[0] = { "Triangular.vert", NULL, 0, RD_SHADER_SOURCES };
-		FXAAShader.mStages[1] = { "FXAA.frag", NULL, 0, RD_SHADER_SOURCES };
+		FXAAShader.mStages[0] = { "Triangular.vert", NULL, 0 };
+		FXAAShader.mStages[1] = { "FXAA.frag", NULL, 0 };
 		
 		addShader(pRenderer, &FXAAShader, &pFXAAShader);
 		
 		ShaderLoadDesc WaterMarkShader = {};
 		
-		WaterMarkShader.mStages[0] = { "watermark.vert", NULL, 0, RD_SHADER_SOURCES };
-		WaterMarkShader.mStages[1] = { "watermark.frag", NULL, 0, RD_SHADER_SOURCES };
+		WaterMarkShader.mStages[0] = { "watermark.vert", NULL, 0 };
+		WaterMarkShader.mStages[1] = { "watermark.frag", NULL, 0 };
 		
 		addShader(pRenderer, &WaterMarkShader, &pWaterMarkShader);
 		
@@ -751,7 +750,7 @@ public:
         
 		RenderTargetBarrier barriers[] =
 		{
-			{ pShadowRT, RESOURCE_STATE_DEPTH_WRITE },
+			{ pShadowRT, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_DEPTH_WRITE },
 		};
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 		
@@ -765,6 +764,9 @@ public:
 		cmdBindPipeline(cmd, pPipelineShadowPass_NonOPtimized);
 		cmdBindDescriptorSet(cmd, 0, pDescriptorSetsShadow[DESCRIPTOR_UPDATE_FREQ_NONE]);
 		cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetsShadow[DESCRIPTOR_UPDATE_FREQ_PER_FRAME]);
+#ifdef ORBIS
+		cmdBindDescriptorSet(cmd, 0, gCurrentAsset.pMaterialSet);
+#endif
 		
 		const uint32_t stride = sizeof(float) * 5;
 		cmdBindVertexBuffer(cmd, 1, &pFloorVB, &stride, NULL);
@@ -801,24 +803,13 @@ public:
 	
 	bool Init()
 	{
-#if defined(TARGET_IOS)
-		fsRegisterUTIForExtension("dyn.ah62d4rv4ge80s5dyq2", "gltf");
-#endif
-		
-        // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/08_GltfViewer");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../UnitTestResources/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,             "../../UnitTestResources/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,     "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,         "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,     "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,     "../../../../Middleware_3/UI");
-        }
+		// FILE PATHS
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES,  "Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES, "CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG,      "GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES,        "Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS,           "Fonts");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_MESHES,          "Meshes");
 		
 		// window and renderer setup
 		RendererDesc settings = { 0 };
@@ -832,12 +823,15 @@ public:
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
         
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pGraphicsQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
         
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -851,19 +845,17 @@ public:
 		if (!gAppUI.Init(pRenderer))
 			return false;
 		
-		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 		
 		initProfiler();
 
 		gGpuProfileToken = addGpuProfiler(pRenderer, pGraphicsQueue, "Graphics");
 
-#if defined(__ANDROID__) || defined(TARGET_IOS)
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 		{
 			LOGF(LogLevel::eERROR, "Could not initialize Virtual Joystick.");
 			return false;
 		}
-#endif
 	
 		SamplerDesc defaultSamplerDesc = {
 			FILTER_LINEAR, FILTER_LINEAR, MIPMAP_MODE_LINEAR,
@@ -890,7 +882,7 @@ public:
 		floorVbDesc.mDesc.mSize = sizeof(float) * 5 * 4;
 		floorVbDesc.pData = floorPoints;
 		floorVbDesc.ppBuffer = &pFloorVB;
-		addResource(&floorVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&floorVbDesc, NULL);
 		
 		uint16_t floorIndices[] =
 		{
@@ -905,7 +897,7 @@ public:
 		indexBufferDesc.mDesc.mSize = sizeof(uint16_t) * 6;
 		indexBufferDesc.pData = floorIndices;
 		indexBufferDesc.ppBuffer = &pFloorIB;
-		addResource(&indexBufferDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&indexBufferDesc, NULL);
 		
 		float screenTriangularPoints[] =
 		{
@@ -920,7 +912,7 @@ public:
 		screenQuadVbDesc.mDesc.mSize = sizeof(float) * 5 * 3;
 		screenQuadVbDesc.pData = screenTriangularPoints;
 		screenQuadVbDesc.ppBuffer = &TriangularVB;
-		addResource(&screenQuadVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&screenQuadVbDesc, NULL);
 		
 		TextureDesc defaultTextureDesc = {};
 		defaultTextureDesc.mArraySize = 1;
@@ -933,92 +925,18 @@ public:
 		defaultTextureDesc.mStartState = RESOURCE_STATE_COMMON;
 		defaultTextureDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		defaultTextureDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
-		defaultTextureDesc.pDebugName = gMissingTextureString;
+		defaultTextureDesc.pName = gMissingTextureString;
 		TextureLoadDesc defaultLoadDesc = {};
 		defaultLoadDesc.pDesc = &defaultTextureDesc;
-		RawImageData idata = {};
-		unsigned char blackData[64];
-		memset(blackData, 0, sizeof(unsigned char) * 64);
-        
-		idata.mArraySize = 1;
-		idata.mDepth = defaultTextureDesc.mDepth;
-		idata.mWidth = defaultTextureDesc.mWidth;
-		idata.mHeight = defaultTextureDesc.mHeight;
-		idata.mFormat = defaultTextureDesc.mFormat;
-		idata.mMipLevels = defaultTextureDesc.mMipLevels;
-		idata.pRawData = (uint8_t*)blackData;
-		defaultLoadDesc.pRawImageData = &idata;
-		
 		defaultLoadDesc.ppTexture = &pTextureBlack;
-		addResource(&defaultLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
-		
-#if defined(__ANDROID__) || defined(__LINUX__)
-		// Get list of Models
-		eastl::vector<eastl::string> filesToLoad;
-		eastl::vector<PathHandle> filesToLoadFullPath;
-		PathHandle meshDirectory = fsGetResourceDirEnumPath(RD_MESHES);
-		eastl::vector<PathHandle> filesInDirectory = fsGetFilesWithExtension(meshDirectory, "gltf");
-		
-		//reduce duplicated filenames
-		for (size_t i = 0; i < filesInDirectory.size(); ++i)
-		{
-			const PathHandle & file = filesInDirectory[i];
-			
-			eastl::string tempfile(fsGetPathAsNativeString(file));
-			
-			const char* first = strstr(tempfile.c_str(), "PQPM");
-			
-			bool bAlreadyLoaded = false;
-			
-			if (first != NULL)
-			{
-				for (size_t j = 0; j < filesToLoad.size(); ++j)
-				{
-					if (strstr(tempfile.c_str(), filesToLoad[j].c_str()) != NULL)
-					{
-						bAlreadyLoaded = true;
-						break;
-					}
-				}
-				
-				if (!bAlreadyLoaded)
-				{
-					int gap = first - tempfile.c_str();
-					tempfile.resize(gap);
-					filesToLoad.push_back(tempfile);
-					filesToLoadFullPath.push_back(file);
-				}
-			}
-			else
-			{
-				filesToLoad.push_back(tempfile);
-				filesToLoadFullPath.push_back(file);
-			}
-		}
-		
-		size_t modelFileCount = filesToLoadFullPath.size();
-		
-		eastl::vector<const char*> modelFileNames(modelFileCount);
-		gModelFiles.resize(modelFileCount);
-		gDropDownWidgetData.resize(modelFileCount);
-		
-		for (size_t i = 0; i < modelFileCount; ++i)
-		{
-			const PathHandle& file = filesToLoadFullPath[i];
-			
-			gModelFiles[i] = file;
-			modelFileNames[i] = fsGetPathFileName(gModelFiles[i]).buffer;
-			gDropDownWidgetData[i] = (uint32_t)i;
-		}
-		
-		gModelFile = gModelFiles[0];
-		gGuiModelToLoad = gModelFiles[0];
-		
-#else
-		PathHandle fullModelPath = fsGetPathInResourceDirEnum(RD_MESHES, gDefaultModelFile);
-		gModelFile = fullModelPath;
-		gGuiModelToLoad = fullModelPath;
-#endif
+		addResource(&defaultLoadDesc, NULL);
+
+		TextureUpdateDesc updateDesc = { pTextureBlack };
+		beginUpdateResource(&updateDesc);
+		memset(updateDesc.pMappedData, 0, 4 * 4 * sizeof(uint32_t));
+		endUpdateResource(&updateDesc, NULL);
+
+		gModelFile = pModelNames[mModelSelected];
 		
 		BufferLoadDesc ubDesc = {};
 		ubDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1029,7 +947,7 @@ public:
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pUniformBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 		
 		BufferLoadDesc subDesc = {};
@@ -1041,7 +959,7 @@ public:
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			subDesc.ppBuffer = &pShadowUniformBuffer[i];
-			addResource(&subDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&subDesc, NULL);
 		}
 		
 		ubDesc = {};
@@ -1053,43 +971,33 @@ public:
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pFloorUniformBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 		/************************************************************************/
 		// GUI
 		/************************************************************************/
-		GuiDesc guiDesc = {};
-		guiDesc.mStartSize = vec2(300.0f, 250.0f);
-		guiDesc.mStartPosition = vec2(100.0f, guiDesc.mStartSize.getY());
+		GuiDesc guiDesc = {};		
+		guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.2f);
 		pGuiWindow = gAppUI.AddGuiComponent(GetName(), &guiDesc);
 		
-#if !defined(TARGET_IOS) && !defined(_DURANGO)
+#if !defined(TARGET_IOS)
 		pGuiWindow->AddWidget(CheckboxWidget("Toggle VSync", &bToggleVSync));
 #endif
 		
-#if defined(__ANDROID__) || defined(__LINUX__)
-		pGuiWindow->AddWidget(DropdownWidget("Models", &guiModelToLoadIndex, modelFileNames.data(), gDropDownWidgetData.data(), (uint32_t)gModelFiles.size()));
-#else
 		pGuiWindow->AddWidget(SeparatorWidget());
-		
-		ButtonWidget loadModelButtonWidget("Load Model                                      ");
-		loadModelButtonWidget.pOnEdited = GLTFViewer::LoadNewModel;
-		pGuiWindow->AddWidget(loadModelButtonWidget);
+
+		DropdownWidget loadModelWidget("Load Model", &mModelSelected, pModelNames, gModelValues, mModelCount);
+
+		pGuiWindow->AddWidget(loadModelWidget);
 		
 		pGuiWindow->AddWidget(SeparatorWidget());
-		
-		//ButtonWidget loadLODButtonWidget("Load Model LOD");
-		//loadLODButtonWidget.pOnEdited = GLTFViewer::LoadLOD;
-		//pGuiWindow->AddWidget(loadLODButtonWidget);
-#endif
 		
 		pSelectLodWidget = pGuiWindow->AddWidget(SliderIntWidget("LOD", &gCurrentLod, 0, gMaxLod));
 		
 		////////////////////////////////////////////////////////////////////////////////////////////
 		
-		guiDesc = {};
-		guiDesc.mStartSize = vec2(400.0f, 250.0f);
-		guiDesc.mStartPosition = vec2(mSettings.mWidth - guiDesc.mStartSize.getX(), guiDesc.mStartSize.getY());
+		guiDesc = {};		
+		guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.35f);
 		pGuiGraphics = gAppUI.AddGuiComponent("Graphics Options", &guiDesc);
 		
 		pGuiGraphics->AddWidget(CheckboxWidget("Enable FXAA", &bToggleFXAA));
@@ -1176,9 +1084,7 @@ public:
 		{
 			if (!gAppUI.IsFocused() && *ctx->pCaptured)
 			{
-#if defined(TARGET_IOS) || defined(__ANDROID__)
 				gVirtualJoystick.OnMove(index, ctx->mPhase != INPUT_ACTION_PHASE_CANCELED, ctx->pPosition);
-#endif
 				index ? pCameraController->onRotate(ctx->mFloat2) : pCameraController->onMove(ctx->mFloat2);
 			}
 			return true;
@@ -1189,45 +1095,37 @@ public:
 		addInputAction(&actionDesc);
 		actionDesc = { InputBindings::BUTTON_NORTH, [](InputActionContext* ctx) { pCameraController->resetView(); return true; } };
 		addInputAction(&actionDesc);
+
+		waitForAllResourceLoads();
 		
 		return true;
 	}
 	
-	static bool LoadModel(GLTFAsset& asset, const Path* modelFilePath)
+	static bool LoadModel(GLTFAsset& asset, const char* modelFileName)
 	{
-		eastl::string modelFileName = fsPathComponentToString(fsGetPathFileName(modelFilePath));
-
-		eastl::vector<PathHandle> validFileLists;
-		eastl::vector<PathHandle> intermediateFileLists;
-		
-#if defined(TARGET_IOS)
-		PathHandle meshDirectory = fsGetParentPath(modelFilePath);
-#else
-		PathHandle meshDirectory = fsGetResourceDirEnumPath(RD_MESHES);
-#endif
-		eastl::vector<PathHandle> fileLists = fsGetFilesWithExtension(meshDirectory, "gltf");
-		
+		//eastl::vector<PathHandle> validFileLists;
+				
 		eastl::string fileNameOnly = modelFileName;
 
 		gCurrentAsset.removeResources();
 		
 		GeometryLoadDesc loadDesc = {};
 		loadDesc.ppGeometry = &gCurrentAsset.pGeom;
-		loadDesc.pFilePath = modelFilePath;
+		loadDesc.pFileName = modelFileName;
 		loadDesc.pVertexLayout = &gVertexLayoutModel;
-		addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&loadDesc, NULL);
 
-		uint32_t res = gltfLoadContainer(modelFilePath, GLTF_FLAG_CALCULATE_BOUNDS, &gCurrentAsset.pData);
+		uint32_t res = gltfLoadContainer(modelFileName, GLTF_FLAG_CALCULATE_BOUNDS, &gCurrentAsset.pData);
 		if (res)
 		{
 			return false;
 		}
 		
-		asset.Init(modelFilePath, pRenderer, pDefaultSampler);
+		asset.Init(pRenderer, pDefaultSampler);
 		
 		pGuiWindow->RemoveWidget(pSelectLodWidget);
-		gMaxLod = max((int)validFileLists.size() - 1, 0);
-		pSelectLodWidget = pGuiWindow->AddWidget(SliderIntWidget("LOD", &gCurrentLod, 0, gMaxLod));
+		//gMaxLod = max((int)validFileLists.size() - 1, 0);
+		//pSelectLodWidget = pGuiWindow->AddWidget(SliderIntWidget("LOD", &gCurrentLod, 0, gMaxLod));
 		waitForAllResourceLoads();
 		return true;
 	}
@@ -1337,9 +1235,8 @@ public:
 	
 	static void RemoveModelDependentResources()
 	{
-		RemoveShaderResources();
-		
 		gCurrentAsset.removeResources();
+		RemoveShaderResources();
 		gCurrentAsset = GLTFAsset();
 	}
 	
@@ -1354,9 +1251,7 @@ public:
 		destroyCameraController(pCameraController);
 		destroyCameraController(pLightView);
 		
-#if defined(TARGET_IOS) || defined(__ANDROID__)
 		gVirtualJoystick.Exit();
-#endif
 		
 		gAppUI.Exit();
 		
@@ -1374,8 +1269,11 @@ public:
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
         
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
 
 		removeSampler(pRenderer, pDefaultSampler);
 		removeSampler(pRenderer, pBilinearClampSampler);
@@ -1391,13 +1289,7 @@ public:
 		removeQueue(pRenderer, pGraphicsQueue);
 		removeRenderer(pRenderer);
 		
-#if defined(__linux__) || defined(__ANDROID__)
-		gModelFiles.set_capacity(0);
-		gDropDownWidgetData.set_capacity(0);
-#endif
-
 		gModelFile = NULL;
-		gGuiModelToLoad = NULL;
 	}
 	
 	static void LoadPipelines()
@@ -1524,7 +1416,6 @@ public:
 			pipelineSettings.mSampleCount = pPostProcessRT->mSampleCount;
 			pipelineSettings.mSampleQuality = pPostProcessRT->mSampleQuality;
 			pipelineSettings.pRootSignature = pRootSignaturePostEffects;
-			pipelineSettings.pVertexLayout = &screenTriangle_VertexLayout;
 			pipelineSettings.pRasterizerState = &rasterizerStateDesc;
 			pipelineSettings.pShaderProgram = pVignetteShader;
 			addPipeline(pRenderer, &desc, &pVignettePipeline);
@@ -1542,7 +1433,6 @@ public:
 			pipelineSettings.mSampleCount = pSwapChain->ppRenderTargets[0]->mSampleCount;
 			pipelineSettings.mSampleQuality = pSwapChain->ppRenderTargets[0]->mSampleQuality;
 			pipelineSettings.pRootSignature = pRootSignaturePostEffects;
-			pipelineSettings.pVertexLayout = &screenTriangle_VertexLayout;
 			pipelineSettings.pRasterizerState = &rasterizerStateDesc;
 			pipelineSettings.pShaderProgram = pFXAAShader;
 			addPipeline(pRenderer, &desc, &pFXAAPipeline);
@@ -1566,59 +1456,62 @@ public:
 			addPipeline(pRenderer, &desc, &pWaterMarkPipeline);
 		}
 	}
+
+	bool mModelReload = false;
 	
 	bool Load()
 	{
-		if (!addSwapChain())
-			return false;
-		
-		if (!addRenderTargets())
-			return false;
-		
-		if (!addDepthBuffer())
-			return false;
-		
-		if (!gAppUI.Load(pSwapChain->ppRenderTargets))
-			return false;
-		
-#if defined(TARGET_IOS) || defined(__ANDROID__)
-		if (!gVirtualJoystick.Load(pSwapChain->ppRenderTargets[0]))
-			return false;
-#endif
+		if (!mModelReload)
+		{
+			if (!addSwapChain())
+				return false;
 
-		loadProfilerUI(&gAppUI, mSettings.mWidth, mSettings.mHeight);
+			if (!addRenderTargets())
+				return false;
+
+			if (!addDepthBuffer())
+				return false;
+
+			if (!gAppUI.Load(pSwapChain->ppRenderTargets))
+				return false;
+
+			if (!gVirtualJoystick.Load(pSwapChain->ppRenderTargets[0]))
+				return false;
+
+			loadProfilerUI(&gAppUI, mSettings.mWidth, mSettings.mHeight);
+
+			float wmHeight = min(mSettings.mWidth, mSettings.mHeight) * 0.09f;
+			float wmWidth = wmHeight * 2.8077f;
+
+			float widthGap = wmWidth * 2.0f / (float)mSettings.mWidth;
+			float heightGap = wmHeight * 2.0f / (float)mSettings.mHeight;
+
+			float pixelGap = 80.0f;
+			float widthRight = 1.0f - pixelGap / (float)mSettings.mWidth;
+			float heightDown = -1.0f + pixelGap / (float)mSettings.mHeight;
+
+			float screenWaterMarkPoints[] = {
+				widthRight - widthGap,	heightDown + heightGap, 0.5f, 0.0f, 0.0f,
+				widthRight - widthGap,	heightDown,				0.5f, 0.0f, 1.0f,
+				widthRight,				heightDown + heightGap, 0.5f, 1.0f, 0.0f,
+
+				widthRight,				heightDown + heightGap, 0.5f, 1.0f, 0.0f,
+				widthRight - widthGap,	heightDown,				0.5f, 0.0f, 1.0f,
+				widthRight,				heightDown,				0.5f, 1.0f, 1.0f
+			};
+
+			BufferLoadDesc screenQuadVbDesc = {};
+			screenQuadVbDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_VERTEX_BUFFER;
+			screenQuadVbDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
+			screenQuadVbDesc.mDesc.mSize = sizeof(float) * 5 * 6;
+			screenQuadVbDesc.pData = screenWaterMarkPoints;
+			screenQuadVbDesc.ppBuffer = &WaterMarkVB;
+			addResource(&screenQuadVbDesc, NULL);
+		}
 
 		InitModelDependentResources();
 		
 		LoadPipelines();
-		
-		float wmHeight = min(mSettings.mWidth, mSettings.mHeight) * 0.09f;
-		float wmWidth = wmHeight * 2.8077f;
-		
-		float widthGap = wmWidth * 2.0f / (float)mSettings.mWidth;
-		float heightGap = wmHeight * 2.0f / (float)mSettings.mHeight;
-		
-		float pixelGap = 80.0f;
-		float widthRight = 1.0f - pixelGap / (float)mSettings.mWidth;
-		float heightDown = -1.0f + pixelGap / (float)mSettings.mHeight;
-		
-		float screenWaterMarkPoints[] = {
-			widthRight - widthGap,	heightDown + heightGap, 0.5f, 0.0f, 0.0f,
-			widthRight - widthGap,	heightDown,				0.5f, 0.0f, 1.0f,
-			widthRight,				heightDown + heightGap, 0.5f, 1.0f, 0.0f,
-			
-			widthRight,				heightDown + heightGap, 0.5f, 1.0f, 0.0f,
-			widthRight - widthGap,	heightDown,				0.5f, 0.0f, 1.0f,
-			widthRight,				heightDown,				0.5f, 1.0f, 1.0f
-		};
-		
-		BufferLoadDesc screenQuadVbDesc = {};
-		screenQuadVbDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_VERTEX_BUFFER;
-		screenQuadVbDesc.mDesc.mMemoryUsage = RESOURCE_MEMORY_USAGE_GPU_ONLY;
-		screenQuadVbDesc.mDesc.mSize = sizeof(float) * 5 * 6;
-		screenQuadVbDesc.pData = screenWaterMarkPoints;
-		screenQuadVbDesc.ppBuffer = &WaterMarkVB;
-		addResource(&screenQuadVbDesc, NULL, LOAD_PRIORITY_NORMAL);
 		
 		return true;
 	}
@@ -1640,17 +1533,19 @@ public:
 		waitForFences(pRenderer, gImageCount, pRenderCompleteFences);
 		
 		RemoveModelDependentResources();
+		RemovePipelines();
+
+		if (mModelReload)
+		{
+			return;
+		}
+
+		removeResource(WaterMarkVB);
 
 		unloadProfilerUI();
 		gAppUI.Unload();
 		
-#if defined(TARGET_IOS) || defined(__ANDROID__)
 		gVirtualJoystick.Unload();
-#endif
-		
-		removeResource(WaterMarkVB);
-		
-		RemovePipelines();
 		
 		removeSwapChain(pRenderer, pSwapChain);
 		
@@ -1664,7 +1559,7 @@ public:
 	{
 		updateInputSystem(mSettings.mWidth, mSettings.mHeight);
 		
-#if !defined(__ANDROID__) && !defined(TARGET_IOS) && !defined(_DURANGO)
+#if !defined(__ANDROID__) && !defined(TARGET_IOS)
 		if (pSwapChain->mEnableVsync != bToggleVSync)
 		{
 			waitQueueIdle(pGraphicsQueue);
@@ -1733,27 +1628,15 @@ public:
 	
 	void PostDrawUpdate()
 	{
-		
-#if defined(__ANDROID__) || defined(__LINUX__)
-		if (guiModelToLoadIndex != modelToLoadIndex)
+		if (gPreviousLoadedModel != mModelSelected)
 		{
-			modelToLoadIndex = guiModelToLoadIndex;
-			gGuiModelToLoad = gModelFiles[modelToLoadIndex];
-		}
-#endif
-		if (!fsPathsEqual(gGuiModelToLoad, gModelFile))
-		{
-			if (fsFileExists(gGuiModelToLoad))
-			{
-				gModelFile = gGuiModelToLoad;
-				
-				Unload();
-				Load();
-			}
-			else
-			{
-				gGuiModelToLoad = gModelFile;
-			}
+			gPreviousLoadedModel = mModelSelected;
+			gModelFile = pModelNames[mModelSelected];
+			
+			mModelReload = true;
+			Unload();
+			Load();
+			mModelReload = false;
 		}
 		gCurrentLod = min(gCurrentLod, gMaxLod);
 		
@@ -1768,26 +1651,7 @@ public:
 //			gCurrentLod = 0;
 //		else
 //			gCurrentLod = min((int)log2(pow((float)distanceFromCamera, 0.6f) + 1.0f), gMaxLod);
-	}
-	
-	static void SelectModelFunc(const Path* path, void* pathPtr) {
-		PathHandle *outputPath = (PathHandle*)pathPtr;
-		
-		if (path) {
-			*outputPath = fsCopyPath(path);
-		}
-	}
-	
-	static void LoadNewModel()
-	{
-		eastl::vector<const char*> extFilter;
-		extFilter.push_back("gltf");
-		extFilter.push_back("glb");
-		
-		PathHandle meshDir = fsGetResourceDirEnumPath(RD_MESHES);
-		
-		fsShowOpenFileDialog("Select model to load", meshDir, SelectModelFunc, &gGuiModelToLoad, "Model File", &extFilter[0], extFilter.size());
-	}
+	}	
 	
 	static void LoadLOD()
 	{
@@ -1797,21 +1661,24 @@ public:
 		extFilter.push_back("gltf");
 		extFilter.push_back("glb");
 		
-		PathHandle meshDir = fsGetResourceDirEnumPath(RD_MESHES);
+		//PathHandle meshDir = fsGetResourceDirEnumPath(RD_MESHES);
 		
-		fsShowOpenFileDialog("Select model to load", meshDir, SelectModelFunc, &gGuiModelToLoad, "Model File", &extFilter[0], extFilter.size());
+	//	fsShowOpenFileDialog("Select model to load", meshDir, SelectModelFunc, &gGuiModelToLoad, "Model File", &extFilter[0], extFilter.size());
 	}
 	
 	void Draw()
 	{
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &gFrameIndex);
-		
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
+
 		// Stall if CPU is running "Swap Chain Buffer Count" frames ahead of GPU
 		Fence*      pNextFence = pRenderCompleteFences[gFrameIndex];
 		FenceStatus fenceStatus;
 		getFenceStatus(pRenderer, pNextFence, &fenceStatus);
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pNextFence);
+
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
 		
 		// Update uniform buffers
 		BufferUpdateDesc shaderCbv = { pUniformBuffer[gFrameIndex] };
@@ -1830,7 +1697,7 @@ public:
 							float((gBackroundColor >> 0) & 0xff)) / 255.0f;
 		
 		
-		Cmd* cmd = ppCmds[gFrameIndex];
+		Cmd* cmd = pCmds[gFrameIndex];
 		beginCmd(cmd);
 
 		cmdBeginGpuFrameProfile(cmd, gGpuProfileToken);
@@ -1854,11 +1721,10 @@ public:
 
 			RenderTargetBarrier barriers[] =
 			{
-				{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
-				{ pDepthBuffer, RESOURCE_STATE_DEPTH_WRITE },
-				{ pShadowRT, RESOURCE_STATE_SHADER_RESOURCE }
+				{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+				{ pShadowRT, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE }
 			};
-			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 3, barriers);
+			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
             
 			cmdBindRenderTargets(cmd, 1, &pRenderTarget, pDepthBuffer, &loadActions, NULL, NULL, -1, -1);
 			cmdSetViewport(cmd, 0.0f, 0.0f, (float)pRenderTarget->mWidth, (float)pRenderTarget->mHeight, 0.0f, 1.0f);
@@ -1874,7 +1740,8 @@ public:
 			
 			cmdBindDescriptorSet(cmd, 0, pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_NONE]);
 			cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_PER_FRAME]);
-			
+			cmdBindDescriptorSet(cmd, 0, gCurrentAsset.pMaterialSet);
+
 			const uint32_t stride = sizeof(float) * 5;
 			cmdBindVertexBuffer(cmd, 1, &pFloorVB, &stride, NULL);
 			cmdBindIndexBuffer(cmd, pFloorIB, INDEX_TYPE_UINT16, 0);
@@ -1926,13 +1793,13 @@ public:
 
 		pRenderTarget = pPostProcessRT;
 		RenderTargetBarrier barriers[] = {
-			{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
-			{ pForwardRT, RESOURCE_STATE_SHADER_RESOURCE }
+			{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+			{ pForwardRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
 		};
 		
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
 		
-		if (bVignetting) 
+		if (bVignetting)
 		{
 			LoadActionsDesc loadActions = {};
 			loadActions.mLoadActionsColor[0] = LOAD_ACTION_LOAD;
@@ -1949,8 +1816,6 @@ public:
 			
 			cmdBindDescriptorSet(cmd, 0, pDescriptorSetVignette);
 			
-			const uint32_t stride = sizeof(float) * 5;
-			cmdBindVertexBuffer(cmd, 1, &TriangularVB, &stride, NULL);
 			cmdDraw(cmd, 3, 0);
 			
 			cmdBindRenderTargets(cmd, 0, NULL, 0, NULL, NULL, NULL, -1, -1);
@@ -1958,12 +1823,12 @@ public:
 			cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 		}
         
-		pRenderTarget = pSwapChain->ppRenderTargets[gFrameIndex];
+		pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		{
 			RenderTargetBarrier barriers[] =
 			{
-				{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
-				{ pPostProcessRT, RESOURCE_STATE_SHADER_RESOURCE }
+				{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
+				{ pPostProcessRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
 			};
 			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
 			
@@ -1984,14 +1849,12 @@ public:
 			cmdBindPipeline(cmd, pFXAAPipeline);
 			
 			FXAAINFO FXAAinfo;
-			FXAAinfo.ScreenSize = vec2((float)mSettings.mWidth, (float)mSettings.mHeight);
+			FXAAinfo.ScreenSize = float2((float)mSettings.mWidth, (float)mSettings.mHeight);
 			FXAAinfo.Use = bToggleFXAA ? 1 : 0;
 			
 			cmdBindDescriptorSet(cmd, 0, bVignetting ? pDescriptorSetFXAA : pDescriptorSetVignette);
 			cmdBindPushConstants(cmd, pRootSignaturePostEffects, "FXAARootConstant", &FXAAinfo);
 			
-			const uint32_t stride = sizeof(float) * 5;
-			cmdBindVertexBuffer(cmd, 1, &TriangularVB, &stride, NULL);
 			cmdDraw(cmd, 3, 0);
 			
 			cmdBindRenderTargets(cmd, 0, NULL, 0, NULL, NULL, NULL, -1, -1);
@@ -2030,13 +1893,13 @@ public:
 			loadActions.mLoadActionsColor[0] = LOAD_ACTION_LOAD;
 			
 			cmdBindRenderTargets(cmd, 1, &pRenderTarget, NULL, &loadActions, NULL, NULL, -1, -1);
-#if defined(TARGET_IOS) || defined(__ANDROID__)
 			//gVirtualJoystick.Draw(cmd, { 1.0f, 1.0f, 1.0f, 1.0f });
-#endif
 
-                cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
 #if !defined(__ANDROID__)
-				cmdDrawGpuProfile(cmd, float2(8, 40), gGpuProfileToken);
+				float2 txtSize = cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
+				cmdDrawGpuProfile(cmd, float2(8.f, txtSize.y + 30.f), gGpuProfileToken, &gFrameTimeDraw);
+#else
+				cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
 #endif
 
 				cmdDrawProfilerUI();
@@ -2048,14 +1911,14 @@ public:
 
 			cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 		}
-		
+
 		cmdBindRenderTargets(cmd, 0, NULL, 0, NULL, NULL, NULL, -1, -1);
-		
-		RenderTargetBarrier finalBarriers = { pRenderTarget, RESOURCE_STATE_PRESENT };
+
+		RenderTargetBarrier finalBarriers = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, &finalBarriers);
 		cmdEndGpuFrameProfile(cmd, gGpuProfileToken);
 		endCmd(cmd);
-		
+
 		QueueSubmitDesc submitDesc = {};
 		submitDesc.mCmdCount = 1;
 		submitDesc.mSignalSemaphoreCount = 1;
@@ -2066,7 +1929,7 @@ public:
 		submitDesc.pSignalFence = pRenderCompleteFence;
 		queueSubmit(pGraphicsQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = gFrameIndex;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
 		presentDesc.pSwapChain = pSwapChain;
@@ -2076,6 +1939,8 @@ public:
 		flipProfiler();
 		
 		PostDrawUpdate();
+
+		gFrameIndex = (gFrameIndex + 1) % gImageCount;
 	}
 	
 	const char* GetName() { return "08_GltfViewer"; }
@@ -2091,8 +1956,7 @@ public:
 		swapChainDesc.mImageCount = gImageCount;
 		
 		swapChainDesc.mColorFormat = getRecommendedSwapchainFormat(true);
-		swapChainDesc.mEnableVsync = false;
-		
+		swapChainDesc.mEnableVsync = mSettings.mDefaultVSyncEnabled;
 		::addSwapChain(pRenderer, &swapChainDesc, &pSwapChain);
 		
 		return pSwapChain != NULL;
@@ -2103,7 +1967,9 @@ public:
 		RenderTargetDesc RT = {};
 		RT.mArraySize = 1;
 		RT.mDepth = 1;
-		RT.mFormat = TinyImageFormat_R8G8B8A8_UNORM;
+		RT.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
+		RT.mFormat = pSwapChain->ppRenderTargets[0]->mFormat;
+		RT.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		
 		vec4 bgColor = vec4(float((gBackroundColor >> 24) & 0xff),
 							float((gBackroundColor >> 16) & 0xff),
@@ -2120,18 +1986,20 @@ public:
 		
 		RT.mSampleCount = SAMPLE_COUNT_1;
 		RT.mSampleQuality = 0;
-		RT.pDebugName = L"Render Target";
+		RT.pName = "Render Target";
 		addRenderTarget(pRenderer, &RT, &pForwardRT);
 		
 		RT = {};
 		RT.mArraySize = 1;
 		RT.mDepth = 1;
-		RT.mFormat = TinyImageFormat_R8G8B8A8_UNORM;
+		RT.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
+		RT.mFormat = pSwapChain->ppRenderTargets[0]->mFormat;
+		RT.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		RT.mWidth = mSettings.mWidth;
 		RT.mHeight = mSettings.mHeight;
 		RT.mSampleCount = SAMPLE_COUNT_1;
 		RT.mSampleQuality = 0;
-		RT.pDebugName = L"Post Process Render Target";
+		RT.pName = "Post Process Render Target";
 		addRenderTarget(pRenderer, &RT, &pPostProcessRT);
 		
 		return pForwardRT != NULL && pPostProcessRT != NULL;
@@ -2146,29 +2014,29 @@ public:
 		depthRT.mClearValue.stencil = 0;
 		depthRT.mDepth = 1;
 		depthRT.mFormat = TinyImageFormat_D32_SFLOAT;
+		depthRT.mStartState = RESOURCE_STATE_DEPTH_WRITE;
 		depthRT.mHeight = mSettings.mHeight;
 		depthRT.mSampleCount = SAMPLE_COUNT_1;
 		depthRT.mSampleQuality = 0;
 		depthRT.mWidth = mSettings.mWidth;
 		depthRT.mFlags = TEXTURE_CREATION_FLAG_ON_TILE;
 		addRenderTarget(pRenderer, &depthRT, &pDepthBuffer);
-		
 		/************************************************************************/
 		// Shadow Map Render Target
 		/************************************************************************/
-		
 		RenderTargetDesc shadowRTDesc = {};
 		shadowRTDesc.mArraySize = 1;
 		shadowRTDesc.mClearValue.depth = 0.0f;
 		shadowRTDesc.mClearValue.stencil = 0;
 		shadowRTDesc.mDepth = 1;
+		shadowRTDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		shadowRTDesc.mFormat = TinyImageFormat_D32_SFLOAT;
+		shadowRTDesc.mStartState = RESOURCE_STATE_SHADER_RESOURCE;
 		shadowRTDesc.mWidth = SHADOWMAP_RES;
 		shadowRTDesc.mHeight = SHADOWMAP_RES;
 		shadowRTDesc.mSampleCount = (SampleCount)SHADOWMAP_MSAA_SAMPLES;
 		shadowRTDesc.mSampleQuality = 0;    // don't need higher quality sample patterns as the texture will be blurred heavily
-		shadowRTDesc.pDebugName = L"Shadow Map RT";
-		
+		shadowRTDesc.pName = "Shadow Map RT";
 		addRenderTarget(pRenderer, &shadowRTDesc, &pShadowRT);
 		
 		return pDepthBuffer != NULL && pShadowRT != NULL;

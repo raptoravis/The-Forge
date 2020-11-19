@@ -88,8 +88,8 @@ Renderer* pRenderer = NULL;
 Buffer*   pUniformBuffer[gImageCount] = { NULL };
 
 Queue*           pGraphicsQueue = NULL;
-CmdPool*         pCmdPool = NULL;
-Cmd**            ppCmds = NULL;
+CmdPool*         pCmdPools[gImageCount];
+Cmd*             pCmds[gImageCount];
 Sampler*         pSampler = NULL;
 
 Fence*     pRenderCompleteFences[gImageCount] = { NULL };
@@ -140,19 +140,11 @@ class Compute: public IApp
 	bool Init()
 	{
         // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/02_Compute");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../UnitTestResources/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,             "../../UnitTestResources/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,     "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,         "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,     "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,     "../../../../Middleware_3/UI");
-        }
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES,	"Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES,	"CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG,		"GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES,			"Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS,			"Fonts");
         
 		initNoise();
 
@@ -167,12 +159,17 @@ class Compute: public IApp
 		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
+
 		CmdPoolDesc cmdPoolDesc = {};
 		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -183,17 +180,17 @@ class Compute: public IApp
 
 		initResourceLoaderInterface(pRenderer);
 
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 		{
 			LOGF(LogLevel::eERROR, "Could not initialize Virtual Joystick.");
 			return false;
 		}
 
 		ShaderLoadDesc displayShader = {};
-		displayShader.mStages[0] = { "display.vert", NULL, 0, RD_SHADER_SOURCES };
-		displayShader.mStages[1] = { "display.frag", NULL, 0, RD_SHADER_SOURCES };
+		displayShader.mStages[0] = { "display.vert", NULL, 0 };
+		displayShader.mStages[1] = { "display.frag", NULL, 0 };
 		ShaderLoadDesc computeShader = {};
-		computeShader.mStages[0] = { "compute.comp", NULL, 0, RD_SHADER_SOURCES };
+		computeShader.mStages[0] = { "compute.comp", NULL, 0 };
 
 		addShader(pRenderer, &displayShader, &pShader);
 		addShader(pRenderer, &computeShader, &pComputeShader);
@@ -243,7 +240,7 @@ class Compute: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pUniformBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 
 		// Width and height needs to be same as Texture's
@@ -253,13 +250,8 @@ class Compute: public IApp
 		if (!gAppUI.Init(pRenderer))
 			return false;
 
-		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
-
-		GuiDesc guiDesc = {};
-		float   dpiScale = getDpiScale().x;
-		guiDesc.mStartSize = vec2(140.0f, 320.0f);
-		guiDesc.mStartPosition = vec2(mSettings.mWidth / dpiScale - guiDesc.mStartSize.getX() * 1.1f, guiDesc.mStartSize.getY() * 0.5f);
-
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
+				
 		CameraMotionParameters cmp{ 100.0f, 150.0f, 300.0f };
 		vec3                   camPos{ 48.0f, 48.0f, 20.0f };
 		vec3                   lookAt{ 0 };
@@ -343,8 +335,13 @@ class Compute: public IApp
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 			removeResource(pUniformBuffer[i]);
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
+
 		removeSampler(pRenderer, pSampler);
 
 		removeShader(pRenderer, pShader);
@@ -379,9 +376,6 @@ class Compute: public IApp
 
 		waitForAllResourceLoads();
 
-		VertexLayout vertexLayout = {};
-		vertexLayout.mAttribCount = 0;
-
 		RasterizerStateDesc rasterizerStateDesc = {};
 		rasterizerStateDesc.mCullMode = CULL_MODE_NONE;
 
@@ -394,7 +388,6 @@ class Compute: public IApp
 		pipelineSettings.pColorFormats = &pSwapChain->ppRenderTargets[0]->mFormat;
 		pipelineSettings.mSampleCount = pSwapChain->ppRenderTargets[0]->mSampleCount;
 		pipelineSettings.mSampleQuality = pSwapChain->ppRenderTargets[0]->mSampleQuality;
-		pipelineSettings.pVertexLayout = &vertexLayout;
 		pipelineSettings.pRootSignature = pRootSignature;
 		pipelineSettings.pShaderProgram = pShader;
 		addPipeline(pRenderer, &desc, &pPipeline);
@@ -474,8 +467,9 @@ class Compute: public IApp
 
 	void Draw()
 	{
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &gFrameIndex);
-		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[gFrameIndex];
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
+		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		Semaphore*    pRenderCompleteSemaphore = pRenderCompleteSemaphores[gFrameIndex];
 		Fence*        pRenderCompleteFence = pRenderCompleteFences[gFrameIndex];
 
@@ -485,6 +479,8 @@ class Compute: public IApp
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pRenderCompleteFence);
 
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
+
 		// simply record the screen cleaning command
 		LoadActionsDesc loadActions = {};
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
@@ -493,7 +489,7 @@ class Compute: public IApp
 		loadActions.mClearColorValues[0].b = 0.0f;
 		loadActions.mClearColorValues[0].a = 0.0f;
 
-		Cmd* cmd = ppCmds[gFrameIndex];
+		Cmd* cmd = pCmds[gFrameIndex];
 		beginCmd(cmd);
 
 		cmdBeginGpuFrameProfile(cmd, gGpuProfileToken);
@@ -519,10 +515,10 @@ class Compute: public IApp
 		cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
 
 		TextureBarrier barriers[] = {
-			{ pTextureComputeOutput, RESOURCE_STATE_SHADER_RESOURCE },
+			{ pTextureComputeOutput, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_SHADER_RESOURCE },
 		};
 		RenderTargetBarrier rtBarriers[] = {
-			{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
+			{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
 		};
 		cmdResourceBarrier(cmd, 0, NULL, 1, barriers, 1, rtBarriers);
 
@@ -540,18 +536,17 @@ class Compute: public IApp
 
 		gVirtualJoystick.Draw(cmd, { 1.0f, 1.0f, 1.0f, 1.0f });
 
-        cmdDrawCpuProfile(cmd, float2(8, 15), &gFrameTimeDraw);
-#if !defined(__ANDROID__)
-        cmdDrawGpuProfile(cmd, float2(8, 40), gGpuProfileToken);
-#endif
+		const float	txtIndent = 8.f;
+		float2 txtSizePx = cmdDrawCpuProfile(cmd, float2(txtIndent, 15.f), &gFrameTimeDraw);
+		cmdDrawGpuProfile(cmd, float2(txtIndent, txtSizePx.y + 30.f), gGpuProfileToken, &gFrameTimeDraw);
 
         cmdDrawProfilerUI();
 		gAppUI.Draw(cmd);
 
 		cmdBindRenderTargets(cmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
-		rtBarriers[0] = { pRenderTarget, RESOURCE_STATE_PRESENT };
-		barriers[0] = { pTextureComputeOutput, RESOURCE_STATE_UNORDERED_ACCESS };
+		rtBarriers[0] = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
+		barriers[0] = { pTextureComputeOutput, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
 		cmdResourceBarrier(cmd, 0, NULL, 1, barriers, 1, rtBarriers);
 
 		cmdEndGpuFrameProfile(cmd, gGpuProfileToken);
@@ -567,13 +562,15 @@ class Compute: public IApp
 		submitDesc.pSignalFence = pRenderCompleteFence;
 		queueSubmit(pGraphicsQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = gFrameIndex;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.pSwapChain = pSwapChain;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
 		presentDesc.mSubmitDone = true;
 		queuePresent(pGraphicsQueue, &presentDesc);
 		flipProfiler();
+
+		gFrameIndex = (gFrameIndex + 1) % gImageCount;
 	}
 
 	const char* GetName() { return "02_Compute"; }
@@ -588,7 +585,7 @@ class Compute: public IApp
 		swapChainDesc.mHeight = mSettings.mHeight;
 		swapChainDesc.mImageCount = gImageCount;
 		swapChainDesc.mColorFormat = getRecommendedSwapchainFormat(true);
-		swapChainDesc.mEnableVsync = false;
+		swapChainDesc.mEnableVsync = mSettings.mDefaultVSyncEnabled;
 		::addSwapChain(pRenderer, &swapChainDesc, &pSwapChain);
 
 		return pSwapChain != NULL;
@@ -611,7 +608,7 @@ class Compute: public IApp
 		desc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
 		textureDesc.pDesc = &desc;
 		textureDesc.ppTexture = &pTextureComputeOutput;
-		addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&textureDesc, NULL);
 
 		return pTextureComputeOutput != NULL;
 	}

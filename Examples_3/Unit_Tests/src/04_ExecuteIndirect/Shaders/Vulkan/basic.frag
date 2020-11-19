@@ -24,11 +24,11 @@
 
 //--------------------------------------------------------------------------------------------
 //
-// Copyright (C) 2009 - 2017 Confetti Interactive Inc.
+// Copyright (C) 2009 - 2017 The Forge Interactive Inc.
 // All rights reserved.
 //
 // This source may not be distributed and/or modified without expressly written permission
-// from Confetti Interactive Inc.
+// from The Forge Interactive Inc.
 //
 //--------------------------------------------------------------------------------------------
 
@@ -46,7 +46,7 @@ layout (UPDATE_FREQ_NONE, binding=2) uniform sampler uSampler0;
 
 void main()
 {
-    const vec3 lightDir = -normalize(vec3(2,-6,-1));
+    const vec3 lightDir = -normalize(vec3(2,6,1));
 
     float wrap_diffuse = clamp(dot(lightDir, normalize(normal)), 0.0, 1.0);
     float light = 2.0f * wrap_diffuse + 0.06f;

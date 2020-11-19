@@ -32,7 +32,7 @@
 #define CUBES_EACH_COL 5
 #define CUBE_NUM (CUBES_EACH_ROW * CUBES_EACH_COL + 1)
 #define DEBUG_OUTPUT 1       //exclusively used for texture data visulization, such as rendering depth, shadow map etc.
-#if defined(DIRECT3D12) || defined(VULKAN) && !defined(_DURANGO)
+#if defined(DIRECT3D12) || defined(VULKAN) || defined(PROSPERO) && !defined(XBOX)
 #define AOIT_ENABLE 1
 #endif
 #define AOIT_NODE_COUNT 4    // 2, 4 or 8. Higher numbers give better results at the cost of performance
@@ -338,6 +338,7 @@ Pipeline* pPipelineSkybox = NULL;
 Pipeline* pPipelineShadow = NULL;
 Pipeline* pPipelineGaussianBlur = NULL;
 #if PT_USE_CAUSTICS != 0
+Pipeline* pPipelinePTGaussianBlur = NULL;
 Pipeline* pPipelinePTShadow = NULL;
 Pipeline* pPipelinePTDownsample = NULL;
 Pipeline* pPipelinePTCopyShadowDepth = NULL;
@@ -377,7 +378,7 @@ RenderTarget* pRenderTargetShadowVariance[2] = { NULL };
 RenderTarget* pRenderTargetShadowDepth = NULL;
 #if PT_USE_CAUSTICS != 0
 RenderTarget* pRenderTargetPTShadowVariance[3] = { NULL };
-RenderTarget* pRenderTargetPTShadowFinal[2][3] = { NULL };
+RenderTarget* pRenderTargetPTShadowFinal[2][3] = { { NULL } };
 #endif
 #endif
 /************************************************************************/
@@ -471,8 +472,8 @@ HiresTimer    gCpuTimer;
 Renderer* pRenderer = NULL;
 
 Queue*   pGraphicsQueue = NULL;
-CmdPool* pCmdPool = NULL;
-Cmd**    ppCmds = NULL;
+CmdPool* pCmdPools[gImageCount];
+Cmd*     pCmds[gImageCount];
 
 SwapChain* pSwapChain = NULL;
 Fence*     pRenderCompleteFences[gImageCount] = { NULL };
@@ -504,7 +505,7 @@ void AddParticleSystem(vec3 position, vec4 color, vec3 translucency = vec3(0.0f)
 	particleBufferDesc.mDesc.mFlags = BUFFER_CREATION_FLAG_PERSISTENT_MAP_BIT;
 	particleBufferDesc.mDesc.mSize = sizeof(ParticleVertex) * 6 * MAX_NUM_PARTICLES;
 	particleBufferDesc.ppBuffer = &pParticleBuffer;
-	addResource(&particleBufferDesc, NULL, LOAD_PRIORITY_NORMAL);
+	addResource(&particleBufferDesc, NULL);
 
 	gScene.mParticleSystems.push_back(ParticleSystem{
 		pParticleBuffer,
@@ -633,21 +634,14 @@ class Transparency: public IApp
 public:
 	bool Init() override
 	{
-        // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/15_Transparency");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../UnitTestResources/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,          "../../UnitTestResources/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,    "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,      "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,  "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,    "../../../../Middleware_3/UI");
-        }
-        
+		// FILE PATHS
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES, "Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES, "CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG, "GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES, "Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_MESHES, "Meshes");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS, "Fonts");
+
 		RendererDesc settings = { NULL };
 		initRenderer(GetName(), &settings, &pRenderer);
 
@@ -655,12 +649,15 @@ public:
 		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pGraphicsQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -673,7 +670,7 @@ public:
 
 		LoadModels();
 
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 			return false;
 
 		CreateSamplers();
@@ -689,7 +686,7 @@ public:
 		if (!gAppUI.Init(pRenderer))
 			return false;
 
-		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+		gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 
 		initProfiler();
         gGpuProfileToken = addGpuProfiler(pRenderer, pGraphicsQueue, "Graphics");
@@ -697,9 +694,7 @@ public:
 		CreateScene();
 
 		GuiDesc guiDesc = {};
-		float   dpiScale = getDpiScale().x;
-		guiDesc.mStartPosition = vec2(5, 200.0f) / dpiScale;
-		guiDesc.mStartSize = vec2(450, 600) / dpiScale;
+		guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.25f);
 
 		pGuiWindow = gAppUI.AddGuiComponent(GetName(), &guiDesc);
 		GuiController::AddGui();
@@ -788,8 +783,11 @@ public:
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
 
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
 
 		exitResourceLoaderInterface(pRenderer);
 		removeQueue(pRenderer, pGraphicsQueue);
@@ -1139,7 +1137,7 @@ public:
 		if (gTransparencyType == TRANSPARENCY_TYPE_PHENOMENOLOGICAL)
 		{
 			rt = pRenderTargetPTBackground;
-			RenderTargetBarrier barrier = { rt, RESOURCE_STATE_RENDER_TARGET };
+			RenderTargetBarrier barrier = { rt, RESOURCE_STATE_PIXEL_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET };
 			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, &barrier);
 		}
 
@@ -1153,7 +1151,7 @@ public:
 
 		cmdBindRenderTargets(pCmd, 1, &rt, NULL, &loadActions, NULL, NULL, -1, -1);
 
-		cmdSetViewport(pCmd, 0.0f, 0.0f, (float)rt->mWidth, (float)rt->mHeight, 0.0f, 1.0f);
+		cmdSetViewport(pCmd, 0.0f, 0.0f, (float)rt->mWidth, (float)rt->mHeight, 1.0f, 1.0f);
 		cmdSetScissor(pCmd, 0, 0, rt->mWidth, rt->mHeight);
 
 		const uint32_t skyboxStride = sizeof(float) * 4;
@@ -1163,6 +1161,7 @@ public:
 		cmdBindVertexBuffer(pCmd, 1, &pBufferSkyboxVertex, &skyboxStride, NULL);
 		cmdDraw(pCmd, 36, 0);
 		cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
+		cmdSetViewport(pCmd, 0.0f, 0.0f, (float)rt->mWidth, (float)rt->mHeight, 0.0f, 1.0f);
 		cmdEndGpuTimestampQuery(pCmd, gGpuProfileToken);
 		cmdEndDebugMarker(pCmd);
 	}
@@ -1172,10 +1171,9 @@ public:
 #if USE_SHADOWS != 0
 		RenderTargetBarrier barriers[2] = {};
 		barriers[0].pRenderTarget = pRenderTargetShadowVariance[0];
+		barriers[0].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		barriers[0].mNewState = RESOURCE_STATE_RENDER_TARGET;
-		barriers[1].pRenderTarget = pRenderTargetShadowDepth;
-		barriers[1].mNewState = RESOURCE_STATE_DEPTH_WRITE;
-		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, barriers);
+		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, barriers);
 
 		LoadActionsDesc loadActions = {};
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
@@ -1204,15 +1202,17 @@ public:
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
 		loadActions.mLoadActionDepth = LOAD_ACTION_DONTCARE;
 
-		for (int i = 0; i < 1; ++i)
+		for (uint32_t i = 0; i < 1; ++i)
 		{
 			float          axis = 0.0f;
 
 			cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
 			barriers[0].pRenderTarget = pRenderTargetShadowVariance[0];
-			barriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+			barriers[0].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			barriers[0].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[1].pRenderTarget = pRenderTargetShadowVariance[1];
+			barriers[1].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[1].mNewState = RESOURCE_STATE_RENDER_TARGET;
 			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, barriers);
 
@@ -1226,8 +1226,10 @@ public:
 			cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
 			barriers[0].pRenderTarget = pRenderTargetShadowVariance[1];
-			barriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+			barriers[0].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			barriers[0].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[1].pRenderTarget = pRenderTargetShadowVariance[0];
+			barriers[1].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[1].mNewState = RESOURCE_STATE_RENDER_TARGET;
 			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, barriers);
 
@@ -1245,7 +1247,8 @@ public:
 		cmdEndDebugMarker(pCmd);
 
 		barriers[0].pRenderTarget = pRenderTargetShadowVariance[0];
-		barriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+		barriers[0].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+		barriers[0].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, barriers);
 #endif
 	}
@@ -1253,16 +1256,17 @@ public:
 	void StochasticShadowPass(Cmd* pCmd)
 	{
 #if PT_USE_CAUSTICS != 0
-		TextureBarrier barriers[3] = {};
-		for (int i = 0; i < 3; ++i)
+		RenderTargetBarrier barriers[3] = {};
+		for (uint32_t i = 0; i < 3; ++i)
 		{
-			barriers[i].pTexture = pRenderTargetPTShadowVariance[i]->pTexture;
+			barriers[i].pRenderTarget = pRenderTargetPTShadowVariance[i];
+			barriers[i].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[i].mNewState = RESOURCE_STATE_RENDER_TARGET;
 		}
-		cmdResourceBarrier(pCmd, 0, NULL, 3, barriers);
+		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 3, barriers);
 
 		LoadActionsDesc loadActions = {};
-		for (int i = 0; i < 3; ++i)
+		for (uint32_t i = 0; i < 3; ++i)
 		{
 			loadActions.mLoadActionsColor[i] = LOAD_ACTION_CLEAR;
 			loadActions.mClearColorValues[i] = pRenderTargetPTShadowVariance[i]->mClearValue;
@@ -1273,9 +1277,6 @@ public:
 		cmdBeginGpuTimestampQuery(pCmd, gGpuProfileToken, "Render stochastic shadow map", true);
 		cmdBeginDebugMarker(pCmd, 1, 0, 1, "Copy shadow map");
 
-		cmdBindDescriptorSet(pCmd, 0, pDescriptorSetPTCopyShadowDepth);
-		cmdBindPipeline(pCmd, pPipelinePTCopyShadowDepth);
-
 		for (uint32_t w = 0; w < 3; ++w)
 		{
 			cmdBindRenderTargets(pCmd, 1, &pRenderTargetPTShadowVariance[w], NULL, &loadActions, NULL, NULL, -1, -1);
@@ -1283,6 +1284,10 @@ public:
 				pCmd, 0.0f, 0.0f, (float)pRenderTargetPTShadowVariance[0]->mWidth,
 				(float)pRenderTargetPTShadowVariance[0]->mHeight, 0.0f, 1.0f);
 			cmdSetScissor(pCmd, 0, 0, pRenderTargetPTShadowVariance[0]->mWidth, pRenderTargetPTShadowVariance[0]->mHeight);
+			
+			cmdBindDescriptorSet(pCmd, 0, pDescriptorSetPTCopyShadowDepth);
+			cmdBindPipeline(pCmd, pPipelinePTCopyShadowDepth);
+			
 			cmdDraw(pCmd, 3, 0);
 		}
 		cmdEndDebugMarker(pCmd);
@@ -1314,11 +1319,13 @@ public:
 		{
 			cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
-			barriers[0].pTexture = pRenderTargetPTShadowVariance[w]->pTexture;
-			barriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
-			barriers[1].pTexture = pRenderTargetPTShadowFinal[0][w]->pTexture;
+			barriers[0].pRenderTarget = pRenderTargetPTShadowVariance[w];
+			barriers[0].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			barriers[0].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			barriers[1].pRenderTarget = pRenderTargetPTShadowFinal[0][w];
+			barriers[1].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[1].mNewState = RESOURCE_STATE_RENDER_TARGET;
-			cmdResourceBarrier(pCmd, 0, NULL, 2, barriers);
+			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, barriers);
 
 			cmdBindRenderTargets(pCmd, 1, &pRenderTargetPTShadowFinal[0][w], NULL, &loadActions, NULL, NULL, -1, -1);
 			cmdSetViewport(
@@ -1343,29 +1350,33 @@ public:
 
 			cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
-			barriers[0].pTexture = pRenderTargetPTShadowFinal[0][w]->pTexture;
-			barriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
-			barriers[1].pTexture = pRenderTargetPTShadowFinal[1][w]->pTexture;
+			barriers[0].pRenderTarget = pRenderTargetPTShadowFinal[0][w];
+			barriers[0].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			barriers[0].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			barriers[1].pRenderTarget = pRenderTargetPTShadowFinal[1][w];
+			barriers[1].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[1].mNewState = RESOURCE_STATE_RENDER_TARGET;
-			cmdResourceBarrier(pCmd, 0, NULL, 2, barriers);
+			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, barriers);
 
 			cmdBindRenderTargets(pCmd, 1, &pRenderTargetPTShadowFinal[1][w], NULL, &loadActions, NULL, NULL, -1, -1);
 
-			cmdBindPipeline(pCmd, pPipelineGaussianBlur);
+			cmdBindPipeline(pCmd, pPipelinePTGaussianBlur);
 			cmdBindPushConstants(pCmd, pRootSignatureGaussianBlur, "RootConstant", &axis);
 			cmdBindDescriptorSet(pCmd, 2 + (w * 2 + 0), pDescriptorSetGaussianBlur);
 			cmdDraw(pCmd, 3, 0);
 
 			cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
-			barriers[0].pTexture = pRenderTargetPTShadowFinal[1][w]->pTexture;
-			barriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
-			barriers[1].pTexture = pRenderTargetPTShadowFinal[0][w]->pTexture;
+			barriers[0].pRenderTarget = pRenderTargetPTShadowFinal[1][w];
+			barriers[0].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			barriers[0].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			barriers[1].pRenderTarget = pRenderTargetPTShadowFinal[0][w];
+			barriers[1].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			barriers[1].mNewState = RESOURCE_STATE_RENDER_TARGET;
-			cmdResourceBarrier(pCmd, 0, NULL, 2, barriers);
+			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, barriers);
 
 			cmdBindRenderTargets(pCmd, 1, &pRenderTargetPTShadowFinal[0][w], NULL, &loadActions, NULL, NULL, -1, -1);
-			cmdBindPipeline(pCmd, pPipelineGaussianBlur);
+			cmdBindPipeline(pCmd, pPipelinePTGaussianBlur);
 
 			axis = 1.0f;
 			cmdBindPushConstants(pCmd, pRootSignatureGaussianBlur, "RootConstant", &axis);
@@ -1375,12 +1386,13 @@ public:
 
 		cmdBindRenderTargets(pCmd, 0, NULL, NULL, NULL, NULL, NULL, -1, -1);
 
-		for (int w = 0; w < 3; ++w)
+		for (uint32_t w = 0; w < 3; ++w)
 		{
-			barriers[0].pTexture = pRenderTargetPTShadowFinal[0][w]->pTexture;
-			barriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
-			cmdResourceBarrier(pCmd, 0, NULL, 1, barriers);
+			barriers[w].pRenderTarget = pRenderTargetPTShadowFinal[0][w];
+			barriers[w].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			barriers[w].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		}
+		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 3, barriers);
 
 		cmdEndGpuTimestampQuery(pCmd, gGpuProfileToken);
 		cmdEndDebugMarker(pCmd);
@@ -1454,9 +1466,7 @@ public:
 #if PT_USE_DIFFUSION != 0
 		if (gTransparencyType == TRANSPARENCY_TYPE_PHENOMENOLOGICAL)
 		{
-			RenderTargetBarrier barrier = {};
-			barrier.pRenderTarget = rt;
-			barrier.mNewState = RESOURCE_STATE_UNORDERED_ACCESS;
+			RenderTargetBarrier barrier = { rt, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_UNORDERED_ACCESS };
 			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, &barrier);
 
 			uint32_t mipSizeX = 1 << (uint32_t)ceil(log2((float)rt->mWidth));
@@ -1479,8 +1489,7 @@ public:
 				cmdDispatch(pCmd, groupCountX, groupCountY, 1);
 			}
 
-			barrier.pRenderTarget = rt;
-			barrier.mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+			barrier = { rt, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
 			cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, &barrier);
 		}
 #endif
@@ -1523,6 +1532,7 @@ public:
 		for (int i = 0; i < WBOIT_RT_COUNT; ++i)
 		{
 			textureBarriers[i].pRenderTarget = pRenderTargetWBOIT[i];
+			textureBarriers[i].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			textureBarriers[i].mNewState = RESOURCE_STATE_RENDER_TARGET;
 		}
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, WBOIT_RT_COUNT, textureBarriers);
@@ -1557,7 +1567,8 @@ public:
 		for (int i = 0; i < WBOIT_RT_COUNT; ++i)
 		{
 			textureBarriers[i].pRenderTarget = pRenderTargetWBOIT[i];
-			textureBarriers[i].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+			textureBarriers[i].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			textureBarriers[i].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		}
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, WBOIT_RT_COUNT, textureBarriers);
 
@@ -1589,8 +1600,10 @@ public:
 #if PT_USE_DIFFUSION != 0
 		// Copy depth buffer
 		textureBarriers[0].pRenderTarget = pRenderTargetDepth;
-		textureBarriers[0].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+		textureBarriers[0].mCurrentState = RESOURCE_STATE_DEPTH_WRITE;
+		textureBarriers[0].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		textureBarriers[1].pRenderTarget = pRenderTargetPTDepthCopy;
+		textureBarriers[1].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		textureBarriers[1].mNewState = RESOURCE_STATE_RENDER_TARGET;
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, textureBarriers);
 
@@ -1615,15 +1628,18 @@ public:
 		cmdEndDebugMarker(pCmd);
 
 		textureBarriers[0].pRenderTarget = pRenderTargetDepth;
+		textureBarriers[0].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		textureBarriers[0].mNewState = RESOURCE_STATE_DEPTH_WRITE;
 		textureBarriers[1].pRenderTarget = pRenderTargetPTDepthCopy;
-		textureBarriers[1].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+		textureBarriers[1].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+		textureBarriers[1].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, textureBarriers);
 #endif
 
 		for (int i = 0; i < PT_RT_COUNT; ++i)
 		{
 			textureBarriers[i].pRenderTarget = pRenderTargetPT[i];
+			textureBarriers[i].mCurrentState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			textureBarriers[i].mNewState = RESOURCE_STATE_RENDER_TARGET;
 		}
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, PT_RT_COUNT, textureBarriers);
@@ -1655,14 +1671,13 @@ public:
 		cmdEndDebugMarker(pCmd);
 
 		// Composite PT buffers
-		for (int i = 0; i < PT_RT_COUNT; ++i)
+		for (uint32_t i = 0; i < PT_RT_COUNT; ++i)
 		{
 			textureBarriers[i].pRenderTarget = pRenderTargetPT[i];
-			textureBarriers[i].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
+			textureBarriers[i].mCurrentState = RESOURCE_STATE_RENDER_TARGET;
+			textureBarriers[i].mNewState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		}
-		textureBarriers[PT_RT_COUNT].pRenderTarget = pRenderTargetPTBackground;
-		textureBarriers[PT_RT_COUNT].mNewState = RESOURCE_STATE_SHADER_RESOURCE;
-		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, PT_RT_COUNT + 1, textureBarriers);
+		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, PT_RT_COUNT, textureBarriers);
 
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_LOAD;
 		loadActions.mLoadActionDepth = LOAD_ACTION_LOAD;
@@ -1687,8 +1702,14 @@ public:
 #if AOIT_ENABLE
 	void AdaptiveOrderIndependentTransparency(Cmd* pCmd)
 	{
-		TextureBarrier textureBarrier = { pTextureAOITClearMask, RESOURCE_STATE_UNORDERED_ACCESS };
-		cmdResourceBarrier(pCmd, 0, NULL, 1, &textureBarrier, 0, NULL);
+		TextureBarrier textureBarrier = { pTextureAOITClearMask, RESOURCE_STATE_PIXEL_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS };
+		BufferBarrier bufferBarriers[2] = {
+			{ pBufferAOITColorData, RESOURCE_STATE_PIXEL_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS },
+#if AOIT_NODE_COUNT != 2
+			{ pBufferAOITDepthData, RESOURCE_STATE_PIXEL_SHADER_RESOURCE, RESOURCE_STATE_UNORDERED_ACCESS },
+#endif
+		};
+		cmdResourceBarrier(pCmd, sizeof(bufferBarriers) / sizeof(bufferBarriers[0]), bufferBarriers, 1, &textureBarrier, 0, NULL);
 
 		// Clear AOIT buffers
 		LoadActionsDesc loadActions = {};
@@ -1734,16 +1755,12 @@ public:
 		cmdEndDebugMarker(pCmd);
 
 		// Composite AOIT buffers
-		textureBarrier = { pTextureAOITClearMask, RESOURCE_STATE_SHADER_RESOURCE };
-
-		int           bufferBarrierCount = 1;
-		BufferBarrier bufferBarriers[2] = {};
-		bufferBarriers[0].pBuffer = pBufferAOITColorData;
+		textureBarrier = { pTextureAOITClearMask, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
+		bufferBarriers[0] = { pBufferAOITColorData, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
 #if AOIT_NODE_COUNT != 2
-		bufferBarriers[1].pBuffer = pBufferAOITDepthData;
-		bufferBarrierCount = 2;
+		bufferBarriers[1] = { pBufferAOITDepthData, RESOURCE_STATE_UNORDERED_ACCESS, RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
 #endif
-		cmdResourceBarrier(pCmd, bufferBarrierCount, bufferBarriers, 1, &textureBarrier, 0, NULL);
+		cmdResourceBarrier(pCmd, sizeof(bufferBarriers) / sizeof(bufferBarriers[0]), bufferBarriers, 1, &textureBarrier, 0, NULL);
 
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_LOAD;
 		loadActions.mLoadActionDepth = LOAD_ACTION_LOAD;
@@ -1768,7 +1785,8 @@ public:
 
 	void Draw() override
 	{
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &gFrameIndex);
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
 
 		Semaphore* pRenderCompleteSemaphore = pRenderCompleteSemaphores[gFrameIndex];
 		Fence*     pRenderCompleteFence = pRenderCompleteFences[gFrameIndex];
@@ -1778,6 +1796,8 @@ public:
 		getFenceStatus(pRenderer, pRenderCompleteFence, &fenceStatus);
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pRenderCompleteFence);
+
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
 
 		gCpuTimer.GetUSec(true);
 		/************************************************************************/
@@ -1836,16 +1856,15 @@ public:
 		// Rendering
 		/************************************************************************/
 		// Get command list to store rendering commands for this frame
-		Cmd* pCmd = ppCmds[gFrameIndex];
+		Cmd* pCmd = pCmds[gFrameIndex];
 
-		pRenderTargetScreen = pSwapChain->ppRenderTargets[gFrameIndex];
+		pRenderTargetScreen = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		beginCmd(pCmd);
 		cmdBeginGpuFrameProfile(pCmd, gGpuProfileToken);
 		RenderTargetBarrier barriers1[] = {
-			{ pRenderTargetScreen, RESOURCE_STATE_RENDER_TARGET },
-			{ pRenderTargetDepth, RESOURCE_STATE_DEPTH_WRITE },
+			{ pRenderTargetScreen, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
 		};
-		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 2, barriers1);
+		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, barriers1);
 
 		DrawSkybox(pCmd);
 		ShadowPass(pCmd);
@@ -1869,13 +1888,15 @@ public:
 
 		////////////////////////////////////////////////////////
 		//  Draw UIs
+		LoadActionsDesc loadActions = {};
+		loadActions.mLoadActionsColor[0] = LOAD_ACTION_LOAD;
+
 		cmdBeginDebugMarker(pCmd, 0, 1, 0, "Draw UI");
-		cmdBindRenderTargets(pCmd, 1, &pRenderTargetScreen, NULL, NULL, NULL, NULL, -1, -1);
+		cmdBindRenderTargets(pCmd, 1, &pRenderTargetScreen, NULL, &loadActions, NULL, NULL, -1, -1);
 
 
-        cmdDrawCpuProfile(pCmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
-
-		cmdDrawGpuProfile(pCmd, float2(8.0f, 40.0f), gGpuProfileToken);
+        float2 txtSize = cmdDrawCpuProfile(pCmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
+		cmdDrawGpuProfile(pCmd, float2(8.0f, txtSize.y + 30.f), gGpuProfileToken);
 
 		gVirtualJoystick.Draw(pCmd, { 1.0f, 1.0f, 1.0f, 1.0f });
 
@@ -1888,7 +1909,7 @@ public:
 		cmdEndDebugMarker(pCmd);
 		////////////////////////////////////////////////////////
 
-		barriers1[0] = { pRenderTargetScreen, RESOURCE_STATE_PRESENT };
+		barriers1[0] = { pRenderTargetScreen, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 		cmdResourceBarrier(pCmd, 0, NULL, 0, NULL, 1, barriers1);
 
 		cmdEndGpuFrameProfile(pCmd, gGpuProfileToken);
@@ -1904,13 +1925,15 @@ public:
 		submitDesc.pSignalFence = pRenderCompleteFence;
 		queueSubmit(pGraphicsQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = gFrameIndex;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
 		presentDesc.pSwapChain = pSwapChain;
 		presentDesc.mSubmitDone = true;
 		queuePresent(pGraphicsQueue, &presentDesc);
 		flipProfiler();
+
+		gFrameIndex = (gFrameIndex + 1) % gImageCount;
 	}
 
 	const char* GetName() override { return "15_Transparency"; }
@@ -2010,73 +2033,72 @@ public:
 
 		// Skybox shader
 		ShaderLoadDesc skyboxShaderDesc = {};
-		skyboxShaderDesc.mStages[0] = { "skybox.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		skyboxShaderDesc.mStages[1] = { "skybox.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		skyboxShaderDesc.mStages[0] = { "skybox.vert", shaderMacros, numShaderMacros };
+		skyboxShaderDesc.mStages[1] = { "skybox.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &skyboxShaderDesc, &pShaderSkybox);
 
 #if USE_SHADOWS != 0
 		// Shadow mapping shader
 		ShaderLoadDesc shadowShaderDesc = {};
-		shadowShaderDesc.mStages[0] = { "shadow.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		shadowShaderDesc.mStages[1] = { "shadow.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		shadowShaderDesc.mStages[0] = { "shadow.vert", shaderMacros, numShaderMacros };
+		shadowShaderDesc.mStages[1] = { "shadow.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &shadowShaderDesc, &pShaderShadow);
 
 		// Gaussian blur shader
 		ShaderLoadDesc blurShaderDesc = {};
-		blurShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		blurShaderDesc.mStages[1] = { "gaussianBlur.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		blurShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+		blurShaderDesc.mStages[1] = { "gaussianBlur.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &blurShaderDesc, &pShaderGaussianBlur);
 
 #if PT_USE_CAUSTICS != 0
 		// Stochastic shadow mapping shader
 		ShaderLoadDesc stochasticShadowShaderDesc = {};
-		stochasticShadowShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		stochasticShadowShaderDesc.mStages[1] = { "stochasticShadow.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		stochasticShadowShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros };
+		stochasticShadowShaderDesc.mStages[1] = { "stochasticShadow.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &stochasticShadowShaderDesc, &pShaderPTShadow);
 
 		// Downsample shader
 		ShaderLoadDesc downsampleShaderDesc = {};
-		downsampleShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		downsampleShaderDesc.mStages[1] = { "downsample.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		downsampleShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+		downsampleShaderDesc.mStages[1] = { "downsample.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &downsampleShaderDesc, &pShaderPTDownsample);
 
 		// Shadow map copy shader
 		ShaderLoadDesc copyShadowDepthShaderDesc = {};
-		copyShadowDepthShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		copyShadowDepthShaderDesc.mStages[1] = { "copy.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		copyShadowDepthShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+		copyShadowDepthShaderDesc.mStages[1] = { "copy.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &copyShadowDepthShaderDesc, &pShaderPTCopyShadowDepth);
 #endif
 #endif
 
 		// Forward shading shader
 		ShaderLoadDesc forwardShaderDesc = {};
-		forwardShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		forwardShaderDesc.mStages[1] = { "forward.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		forwardShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros };
+		forwardShaderDesc.mStages[1] = { "forward.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &forwardShaderDesc, &pShaderForward);
 
 		// WBOIT shade shader
 		ShaderLoadDesc wboitShadeShaderDesc = {};
-		wboitShadeShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		wboitShadeShaderDesc.mStages[1] = { "weightedBlendedOIT.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		wboitShadeShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros };
+		wboitShadeShaderDesc.mStages[1] = { "weightedBlendedOIT.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &wboitShadeShaderDesc, &pShaderWBOITShade);
 
 		// WBOIT composite shader
 		ShaderLoadDesc wboitCompositeShaderDesc = {};
-		wboitCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		wboitCompositeShaderDesc.mStages[1] = { "weightedBlendedOITComposite.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		wboitCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+		wboitCompositeShaderDesc.mStages[1] = { "weightedBlendedOITComposite.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &wboitCompositeShaderDesc, &pShaderWBOITComposite);
 
 		// WBOIT Volition shade shader
 		ShaderLoadDesc wboitVolitionShadeShaderDesc = {};
-		wboitVolitionShadeShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		wboitVolitionShadeShaderDesc.mStages[1] = { "weightedBlendedOITVolition.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		wboitVolitionShadeShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros };
+		wboitVolitionShadeShaderDesc.mStages[1] = { "weightedBlendedOITVolition.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &wboitVolitionShadeShaderDesc, &pShaderWBOITVShade);
 
 		// WBOIT Volition composite shader
 		ShaderLoadDesc wboitVolitionCompositeShaderDesc = {};
-		wboitVolitionCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		wboitVolitionCompositeShaderDesc.mStages[1] = { "weightedBlendedOITVolitionComposite.frag", shaderMacros, numShaderMacros,
-														RD_SHADER_SOURCES };
+		wboitVolitionCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+		wboitVolitionCompositeShaderDesc.mStages[1] = { "weightedBlendedOITVolitionComposite.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &wboitVolitionCompositeShaderDesc, &pShaderWBOITVComposite);
 
 		// PT shade shader
@@ -2085,26 +2107,26 @@ public:
 			ptShaderMacros[i] = shaderMacros[i];
 		ptShaderMacros[numShaderMacros] = { "PHENOMENOLOGICAL_TRANSPARENCY", "" };
 		ShaderLoadDesc ptShadeShaderDesc = {};
-		ptShadeShaderDesc.mStages[0] = { "forward.vert", ptShaderMacros, numShaderMacros + 1, RD_SHADER_SOURCES };
-		ptShadeShaderDesc.mStages[1] = { "phenomenologicalTransparency.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		ptShadeShaderDesc.mStages[0] = { "forward.vert", ptShaderMacros, numShaderMacros + 1 };
+		ptShadeShaderDesc.mStages[1] = { "phenomenologicalTransparency.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &ptShadeShaderDesc, &pShaderPTShade);
 
 		// PT composite shader
 		ShaderLoadDesc ptCompositeShaderDesc = {};
-		ptCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		ptCompositeShaderDesc.mStages[1] = { "phenomenologicalTransparencyComposite.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		ptCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+		ptCompositeShaderDesc.mStages[1] = { "phenomenologicalTransparencyComposite.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &ptCompositeShaderDesc, &pShaderPTComposite);
 
 #if PT_USE_DIFFUSION != 0
 		// PT copy depth shader
 		ShaderLoadDesc ptCopyShaderDesc = {};
-		ptCopyShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-		ptCopyShaderDesc.mStages[1] = { "copy.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		ptCopyShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+		ptCopyShaderDesc.mStages[1] = { "copy.frag", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &ptCopyShaderDesc, &pShaderPTCopyDepth);
 
 		// PT generate mips shader
 		ShaderLoadDesc ptGenMipsShaderDesc = {};
-		ptGenMipsShaderDesc.mStages[0] = { "generateMips.comp", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+		ptGenMipsShaderDesc.mStages[0] = { "generateMips.comp", shaderMacros, numShaderMacros };
 		addShader(pRenderer, &ptGenMipsShaderDesc, &pShaderPTGenMips);
 #endif
 
@@ -2113,20 +2135,20 @@ public:
 		{
 			// AOIT shade shader
 			ShaderLoadDesc aoitShadeShaderDesc = {};
-			aoitShadeShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-			aoitShadeShaderDesc.mStages[1] = { "adaptiveOIT.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+			aoitShadeShaderDesc.mStages[0] = { "forward.vert", shaderMacros, numShaderMacros };
+			aoitShadeShaderDesc.mStages[1] = { "adaptiveOIT.frag", shaderMacros, numShaderMacros };
 			addShader(pRenderer, &aoitShadeShaderDesc, &pShaderAOITShade);
 
 			// AOIT composite shader
 			ShaderLoadDesc aoitCompositeShaderDesc = {};
-			aoitCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-			aoitCompositeShaderDesc.mStages[1] = { "adaptiveOITComposite.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+			aoitCompositeShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+			aoitCompositeShaderDesc.mStages[1] = { "adaptiveOITComposite.frag", shaderMacros, numShaderMacros };
 			addShader(pRenderer, &aoitCompositeShaderDesc, &pShaderAOITComposite);
 
 			// AOIT clear shader
 			ShaderLoadDesc aoitClearShaderDesc = {};
-			aoitClearShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
-			aoitClearShaderDesc.mStages[1] = { "adaptiveOITClear.frag", shaderMacros, numShaderMacros, RD_SHADER_SOURCES };
+			aoitClearShaderDesc.mStages[0] = { "fullscreen.vert", shaderMacros, numShaderMacros };
+			aoitClearShaderDesc.mStages[1] = { "adaptiveOITClear.frag", shaderMacros, numShaderMacros };
 			addShader(pRenderer, &aoitClearShaderDesc, &pShaderAOITClear);
 		}
 #endif
@@ -2673,65 +2695,78 @@ public:
 		skyboxVbDesc.mDesc.mSize = skyBoxDataSize;
 		skyboxVbDesc.pData = gSkyboxPointArray;
 		skyboxVbDesc.ppBuffer = &pBufferSkyboxVertex;
-		addResource(&skyboxVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&skyboxVbDesc, NULL);
 
 #if USE_SHADOWS != 0
 		const uint shadowMapResolution = 1024;
 
 		RenderTargetDesc renderTargetDesc = {};
 		renderTargetDesc.mArraySize = 1;
-		renderTargetDesc.mClearValue = {{1.0f, 1.0f, 1.0f, 1.0f}};
+		renderTargetDesc.mClearValue = { {1.0f, 1.0f, 1.0f, 1.0f} };
 		renderTargetDesc.mDepth = 1;
+		renderTargetDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		renderTargetDesc.mFormat = TinyImageFormat_R16G16_SFLOAT;
+		renderTargetDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		renderTargetDesc.mWidth = shadowMapResolution;
 		renderTargetDesc.mHeight = shadowMapResolution;
 		renderTargetDesc.mSampleCount = SAMPLE_COUNT_1;
 		renderTargetDesc.mSampleQuality = 0;
-		renderTargetDesc.pDebugName = L"Shadow variance RT";
-		for (int i = 0; i < 2; ++i)
+		renderTargetDesc.pName = "Shadow variance RT";
+		for (uint32_t i = 0; i < 2; ++i)
+		{
 			addRenderTarget(pRenderer, &renderTargetDesc, &pRenderTargetShadowVariance[i]);
+		}
 
 		RenderTargetDesc shadowRT = {};
 		shadowRT.mArraySize = 1;
-		shadowRT.mClearValue = {{1.0f, 0.0f}};
+		shadowRT.mClearValue = { {1.0f, 0.0f} };
 		shadowRT.mDepth = 1;
 		shadowRT.mFormat = TinyImageFormat_D16_UNORM;
+		shadowRT.mStartState = RESOURCE_STATE_DEPTH_WRITE;
 		shadowRT.mWidth = shadowMapResolution;
 		shadowRT.mHeight = shadowMapResolution;
 		shadowRT.mSampleCount = SAMPLE_COUNT_1;
 		shadowRT.mSampleQuality = 0;
-		shadowRT.pDebugName = L"Shadow depth RT";
+		shadowRT.pName = "Shadow depth RT";
 		addRenderTarget(pRenderer, &shadowRT, &pRenderTargetShadowDepth);
 
 #if PT_USE_CAUSTICS != 0
 		const uint ptShadowMapResolution = 4096;
 		renderTargetDesc = {};
 		renderTargetDesc.mArraySize = 1;
-		renderTargetDesc.mClearValue = { 1.0f, 1.0f, 1.0f, 1.0f };
+		renderTargetDesc.mClearValue = { { 1.0f, 1.0f, 1.0f, 1.0f } };
 		renderTargetDesc.mDepth = 1;
+		renderTargetDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		renderTargetDesc.mFormat = TinyImageFormat_R16G16_UNORM;
+		renderTargetDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		renderTargetDesc.mWidth = ptShadowMapResolution;
 		renderTargetDesc.mHeight = ptShadowMapResolution;
 		renderTargetDesc.mSampleCount = SAMPLE_COUNT_1;
 		renderTargetDesc.mSampleQuality = 0;
-		renderTargetDesc.pDebugName = L"PT shadow variance RT";
-		for (int w = 0; w < 3; ++w)
+		renderTargetDesc.pName = "PT shadow variance RT";
+		for (uint32_t w = 0; w < 3; ++w)
+		{
 			addRenderTarget(pRenderer, &renderTargetDesc, &pRenderTargetPTShadowVariance[w]);
+		}
 
 		renderTargetDesc = {};
 		renderTargetDesc.mArraySize = 1;
-		renderTargetDesc.mClearValue = { 1.0f, 1.0f, 1.0f, 1.0f };
+		renderTargetDesc.mClearValue = { { 1.0f, 1.0f, 1.0f, 1.0f } };
 		renderTargetDesc.mDepth = 1;
+		renderTargetDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		renderTargetDesc.mFormat = TinyImageFormat_R16G16_UNORM;
+		renderTargetDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 		renderTargetDesc.mWidth = ptShadowMapResolution / 4;
 		renderTargetDesc.mHeight = ptShadowMapResolution / 4;
 		renderTargetDesc.mSampleCount = SAMPLE_COUNT_1;
 		renderTargetDesc.mSampleQuality = 0;
-		renderTargetDesc.pDebugName = L"PT shadow final RT";
-		for (int w = 0; w < 3; ++w)
+		renderTargetDesc.pName = "PT shadow final RT";
+		for (uint32_t w = 0; w < 3; ++w)
 		{
-			for (int i = 0; i < 2; ++i)
+			for (uint32_t i = 0; i < 2; ++i)
+			{
 				addRenderTarget(pRenderer, &renderTargetDesc, &pRenderTargetPTShadowFinal[i][w]);
+			}
 		}
 #endif
 #endif
@@ -2741,15 +2776,19 @@ public:
 	{
 		removeResource(pBufferSkyboxVertex);
 #if USE_SHADOWS != 0
-		for (int i = 0; i < 2; ++i)
+		for (uint32_t i = 0; i < 2; ++i)
+		{
 			removeRenderTarget(pRenderer, pRenderTargetShadowVariance[i]);
+		}
 		removeRenderTarget(pRenderer, pRenderTargetShadowDepth);
 #if PT_USE_CAUSTICS != 0
-		for (int w = 0; w < 3; ++w)
+		for (uint32_t w = 0; w < 3; ++w)
 		{
 			removeRenderTarget(pRenderer, pRenderTargetPTShadowVariance[w]);
-			for (int i = 0; i < 2; ++i)
+			for (uint32_t i = 0; i < 2; ++i)
+			{
 				removeRenderTarget(pRenderer, pRenderTargetPTShadowFinal[i][w]);
+			}
 		}
 #endif
 #endif
@@ -2762,12 +2801,11 @@ public:
 	{
 		static const char* modelNames[MESH_COUNT] = { "cube.gltf", "sphere.gltf", "plane.gltf", "lion.gltf" };
 
-		PathHandle modelPath = fsGetPathInResourceDirEnum(RD_MESHES, modelNames[m]);
 		GeometryLoadDesc loadDesc = {};
-		loadDesc.pFilePath = modelPath;
+		loadDesc.pFileName = modelNames[m];
 		loadDesc.ppGeometry = &pMeshes[m];
 		loadDesc.pVertexLayout = &vertexLayoutDefault;
-		addResource(&loadDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&loadDesc, NULL);
 	}
 
 	void LoadModels()
@@ -2815,11 +2853,10 @@ public:
 
 		for (int i = 0; i < TEXTURE_COUNT; ++i)
 		{
-            PathHandle path = fsGetPathInResourceDirEnum(RD_TEXTURES, textureNames[i]);
 			TextureLoadDesc textureDesc = {};
-			textureDesc.pFilePath = path;
+			textureDesc.pFileName = textureNames[i];
 			textureDesc.ppTexture = &pTextures[i];
-			addResource(&textureDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&textureDesc, NULL);
 		}
 	}
 
@@ -2840,7 +2877,7 @@ public:
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			materialUBDesc.ppBuffer = &pBufferMaterials[i];
-			addResource(&materialUBDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&materialUBDesc, NULL);
 		}
 
 		BufferLoadDesc ubDesc = {};
@@ -2852,12 +2889,12 @@ public:
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pBufferOpaqueObjectTransforms[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pBufferTransparentObjectTransforms[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 
 		BufferLoadDesc skyboxDesc = {};
@@ -2869,7 +2906,7 @@ public:
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			skyboxDesc.ppBuffer = &pBufferSkyboxUniform[i];
-			addResource(&skyboxDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&skyboxDesc, NULL);
 		}
 
 		BufferLoadDesc camUniDesc = {};
@@ -2881,7 +2918,7 @@ public:
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			camUniDesc.ppBuffer = &pBufferCameraUniform[i];
-			addResource(&camUniDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&camUniDesc, NULL);
 		}
 
 		BufferLoadDesc camLightUniDesc = {};
@@ -2893,7 +2930,7 @@ public:
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			camLightUniDesc.ppBuffer = &pBufferCameraLightUniform[i];
-			addResource(&camLightUniDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&camLightUniDesc, NULL);
 		}
 
 		BufferLoadDesc lightUniformDesc = {};
@@ -2905,7 +2942,7 @@ public:
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			lightUniformDesc.ppBuffer = &pBufferLightUniform[i];
-			addResource(&lightUniformDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&lightUniformDesc, NULL);
 		}
 		BufferLoadDesc wboitSettingsDesc = {};
 		wboitSettingsDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -2916,7 +2953,7 @@ public:
 		for (int i = 0; i < gImageCount; ++i)
 		{
 			wboitSettingsDesc.ppBuffer = &pBufferWBOITSettings[i];
-			addResource(&wboitSettingsDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&wboitSettingsDesc, NULL);
 		}
 	}
 
@@ -2954,17 +2991,19 @@ public:
 		depthRT.mArraySize = 1;
 		depthRT.mClearValue = depthClear;
 		depthRT.mDepth = 1;
+		depthRT.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 		depthRT.mFormat = TinyImageFormat_D32_SFLOAT;
+		depthRT.mStartState = RESOURCE_STATE_DEPTH_WRITE;
 		depthRT.mWidth = width;
 		depthRT.mHeight = height;
 		depthRT.mSampleCount = SAMPLE_COUNT_1;
 		depthRT.mSampleQuality = 0;
-		depthRT.pDebugName = L"Depth RT";
-		depthRT.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
+		depthRT.pName = "Depth RT";
 		addRenderTarget(pRenderer, &depthRT, &pRenderTargetDepth);
 #if PT_USE_DIFFUSION != 0
 		depthRT.mFormat = TinyImageFormat_R32_SFLOAT;
-		depthRT.pDebugName = L"Depth RT PT";
+		depthRT.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		depthRT.pName = "Depth RT PT";
 		addRenderTarget(pRenderer, &depthRT, &pRenderTargetPTDepthCopy);
 #endif
 		/************************************************************************/
@@ -2993,19 +3032,21 @@ public:
 		// WBOIT render targets
 		/************************************************************************/
 		ClearValue     wboitClearValues[] = { colorClearBlack, colorClearWhite };
-		const wchar_t* wboitNames[] = { L"Accumulation RT", L"Revealage RT" };
+		const char* wboitNames[] = { "Accumulation RT", "Revealage RT" };
 		for (int i = 0; i < WBOIT_RT_COUNT; ++i)
 		{
 			RenderTargetDesc renderTargetDesc = {};
 			renderTargetDesc.mArraySize = 1;
 			renderTargetDesc.mClearValue = wboitClearValues[i];
 			renderTargetDesc.mDepth = 1;
+			renderTargetDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 			renderTargetDesc.mFormat = gWBOITRenderTargetFormats[i];
+			renderTargetDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			renderTargetDesc.mWidth = width;
 			renderTargetDesc.mHeight = height;
 			renderTargetDesc.mSampleCount = SAMPLE_COUNT_1;
 			renderTargetDesc.mSampleQuality = 0;
-			renderTargetDesc.pDebugName = wboitNames[i];
+			renderTargetDesc.pName = wboitNames[i];
 			addRenderTarget(pRenderer, &renderTargetDesc, &pRenderTargetWBOIT[i]);
 		}
 
@@ -3013,7 +3054,7 @@ public:
 		// PT render targets
 		/************************************************************************/
 		ClearValue     ptClearValues[] = { colorClearBlack, colorClearTransparentWhite, colorClearBlack };
-		const wchar_t* ptNames[] = { L"Accumulation RT", L"Modulation RT", L"Refraction RT" };
+		const char* ptNames[] = { "Accumulation RT", "Modulation RT", "Refraction RT" };
 		for (int i = 0; i < PT_RT_COUNT; ++i)
 		{
 			if (i == PT_RT_ACCUMULATION)
@@ -3026,12 +3067,14 @@ public:
 			renderTargetDesc.mArraySize = 1;
 			renderTargetDesc.mClearValue = ptClearValues[i];
 			renderTargetDesc.mDepth = 1;
+			renderTargetDesc.mDescriptors = DESCRIPTOR_TYPE_TEXTURE;
 			renderTargetDesc.mFormat = gPTRenderTargetFormats[i];
+			renderTargetDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			renderTargetDesc.mWidth = width;
 			renderTargetDesc.mHeight = height;
 			renderTargetDesc.mSampleCount = SAMPLE_COUNT_1;
 			renderTargetDesc.mSampleQuality = 0;
-			renderTargetDesc.pDebugName = ptNames[i];
+			renderTargetDesc.pName = ptNames[i];
 			addRenderTarget(pRenderer, &renderTargetDesc, &pRenderTargetPT[i]);
 		}
 
@@ -3041,13 +3084,14 @@ public:
 			renderTargetDesc.mClearValue = pSwapChain->ppRenderTargets[0]->mClearValue;
 			renderTargetDesc.mDepth = 1;
 			renderTargetDesc.mFormat = pSwapChain->ppRenderTargets[0]->mFormat;
+			renderTargetDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			renderTargetDesc.mWidth = width;
 			renderTargetDesc.mHeight = height;
 			renderTargetDesc.mSampleCount = SAMPLE_COUNT_1;
 			renderTargetDesc.mSampleQuality = 0;
-			renderTargetDesc.mDescriptors = DESCRIPTOR_TYPE_RW_TEXTURE;
+			renderTargetDesc.mDescriptors = DESCRIPTOR_TYPE_RW_TEXTURE | DESCRIPTOR_TYPE_TEXTURE;
 			renderTargetDesc.mMipLevels = (uint)log2(width);
-			renderTargetDesc.pDebugName = L"PT Background RT";
+			renderTargetDesc.pName = "PT Background RT";
 			renderTargetDesc.mFlags = TEXTURE_CREATION_FLAG_OWN_MEMORY_BIT;
 			addRenderTarget(pRenderer, &renderTargetDesc, &pRenderTargetPTBackground);
 		}
@@ -3065,14 +3109,14 @@ public:
 			aoitClearMaskTextureDesc.mSampleCount = SAMPLE_COUNT_1;
 			aoitClearMaskTextureDesc.mSampleQuality = 0;
 			aoitClearMaskTextureDesc.mMipLevels = 1;
-			aoitClearMaskTextureDesc.mStartState = RESOURCE_STATE_UNORDERED_ACCESS;
+			aoitClearMaskTextureDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 			aoitClearMaskTextureDesc.mDescriptors = DESCRIPTOR_TYPE_RW_TEXTURE | DESCRIPTOR_TYPE_TEXTURE;
-			aoitClearMaskTextureDesc.pDebugName = L"AOIT Clear Mask";
+			aoitClearMaskTextureDesc.pName = "AOIT Clear Mask";
 
 			TextureLoadDesc aoitClearMaskTextureLoadDesc = {};
 			aoitClearMaskTextureLoadDesc.pDesc = &aoitClearMaskTextureDesc;
 			aoitClearMaskTextureLoadDesc.ppTexture = &pTextureAOITClearMask;
-			addResource(&aoitClearMaskTextureLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&aoitClearMaskTextureLoadDesc, NULL);
 
 #if AOIT_NODE_COUNT != 2
 			BufferLoadDesc aoitDepthDataLoadDesc = {};
@@ -3082,9 +3126,10 @@ public:
 			aoitDepthDataLoadDesc.mDesc.mStructStride = sizeof(uint32_t) * 4 * AOIT_RT_COUNT;
 			aoitDepthDataLoadDesc.mDesc.mSize = aoitDepthDataLoadDesc.mDesc.mElementCount * aoitDepthDataLoadDesc.mDesc.mStructStride;
 			aoitDepthDataLoadDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_RW_BUFFER | DESCRIPTOR_TYPE_BUFFER;
-			aoitDepthDataLoadDesc.mDesc.pDebugName = L"AOIT Depth Data";
+			aoitDepthDataLoadDesc.mDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			aoitDepthDataLoadDesc.mDesc.pName = "AOIT Depth Data";
 			aoitDepthDataLoadDesc.ppBuffer = &pBufferAOITDepthData;
-			addResource(&aoitDepthDataLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&aoitDepthDataLoadDesc, NULL);
 #endif
 
 			BufferLoadDesc aoitColorDataLoadDesc = {};
@@ -3094,9 +3139,10 @@ public:
 			aoitColorDataLoadDesc.mDesc.mStructStride = sizeof(uint32_t) * 4 * AOIT_RT_COUNT;
 			aoitColorDataLoadDesc.mDesc.mSize = aoitColorDataLoadDesc.mDesc.mElementCount * aoitColorDataLoadDesc.mDesc.mStructStride;
 			aoitColorDataLoadDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_RW_BUFFER | DESCRIPTOR_TYPE_BUFFER;
-			aoitColorDataLoadDesc.mDesc.pDebugName = L"AOIT Color Data";
+			aoitColorDataLoadDesc.mDesc.mStartState = RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+			aoitColorDataLoadDesc.mDesc.pName = "AOIT Color Data";
 			aoitColorDataLoadDesc.ppBuffer = &pBufferAOITColorData;
-			addResource(&aoitColorDataLoadDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&aoitColorDataLoadDesc, NULL);
 		}
 #endif
 
@@ -3120,12 +3166,16 @@ public:
 #if PT_USE_DIFFUSION != 0
 		removeRenderTarget(pRenderer, pRenderTargetPTDepthCopy);
 #endif
-		for (int i = 0; i < WBOIT_RT_COUNT; ++i)
+		for (uint32_t i = 0; i < WBOIT_RT_COUNT; ++i)
+		{
 			removeRenderTarget(pRenderer, pRenderTargetWBOIT[i]);
-		for (int i = 0; i < PT_RT_COUNT; ++i)
+		}
+		for (uint32_t i = 0; i < PT_RT_COUNT; ++i)
 		{
 			if (i == PT_RT_ACCUMULATION)
+			{
 				continue;    // Acculuation RT is shared with WBOIT and has already been removed
+			}
 			removeRenderTarget(pRenderer, pRenderTargetPT[i]);
 		}
 		removeRenderTarget(pRenderer, pRenderTargetPTBackground);
@@ -3319,6 +3369,8 @@ public:
 		addPipeline(pRenderer, &desc, &pPipelineGaussianBlur);
 
 #if PT_USE_CAUSTICS != 0
+		blurPipelineDesc.pColorFormats = &pRenderTargetPTShadowFinal[0][0]->mFormat;
+		addPipeline(pRenderer, &desc, &pPipelinePTGaussianBlur);
 		TinyImageFormat stochasticShadowColorFormats[] = { pRenderTargetPTShadowVariance[0]->mFormat, pRenderTargetPTShadowVariance[1]->mFormat,
             pRenderTargetPTShadowVariance[2]->mFormat };
 
@@ -3605,6 +3657,7 @@ public:
 		removePipeline(pRenderer, pPipelineShadow);
 		removePipeline(pRenderer, pPipelineGaussianBlur);
 #if PT_USE_CAUSTICS != 0
+		removePipeline(pRenderer, pPipelinePTGaussianBlur);
 		removePipeline(pRenderer, pPipelinePTShadow);
 		removePipeline(pRenderer, pPipelinePTDownsample);
 		removePipeline(pRenderer, pPipelinePTCopyShadowDepth);

@@ -73,8 +73,8 @@ uint32_t       gFrameIndex = 0;
 Renderer*      pRenderer = NULL;
 
 Queue*   pGraphicsQueue = NULL;
-CmdPool* pCmdPool = NULL;
-Cmd**    ppCmds = NULL;
+CmdPool* pCmdPools[gImageCount];
+Cmd*     pCmds[gImageCount];
 
 SwapChain*    pSwapChain = NULL;
 RenderTarget* pDepthBuffer = NULL;
@@ -147,7 +147,6 @@ const char* gStickFigureName = "stickFigure/skeleton.ozz";
 const char* gWalkClipName = "stickFigure/animations/walk.ozz";
 const char* gJogClipName = "stickFigure/animations/jog.ozz";
 const char* gRunClipName = "stickFigure/animations/run.ozz";
-const char* pPlaneImageFileName = "Skybox_right1";
 
 const int   gSphereResolution = 30;                   // Increase for higher resolution joint spheres
 const float gBoneWidthRatio = 0.2f;                   // Determines how far along the bone to put the max width [0,1]
@@ -321,20 +320,14 @@ class Blending: public IApp
 	bool Init()
 	{
         // FILE PATHS
-        PathHandle programDirectory = fsGetApplicationDirectory();
-        if (!fsPlatformUsesBundledResources())
-        {
-            PathHandle resourceDirRoot = fsAppendPathComponent(programDirectory, "../../../src/22_Blending");
-            fsSetResourceDirRootPath(resourceDirRoot);
-            
-            fsSetRelativePathForResourceDirEnum(RD_TEXTURES,        "../../UnitTestResources/Textures");
-            fsSetRelativePathForResourceDirEnum(RD_MESHES,             "../../UnitTestResources/Meshes");
-            fsSetRelativePathForResourceDirEnum(RD_BUILTIN_FONTS,     "../../UnitTestResources/Fonts");
-            fsSetRelativePathForResourceDirEnum(RD_ANIMATIONS,         "../../UnitTestResources/Animation");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_TEXT,     "../../../../Middleware_3/Text");
-            fsSetRelativePathForResourceDirEnum(RD_MIDDLEWARE_UI,     "../../../../Middleware_3/UI");
-        }
-        
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES,  "Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES, "CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG,      "GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES,        "Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_MESHES,          "Meshes");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS,           "Fonts");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_ANIMATIONS,      "Animation");
+
 		// WINDOW AND RENDERER SETUP
 		//
 		RendererDesc settings = { 0 };
@@ -348,12 +341,15 @@ class Blending: public IApp
 		queueDesc.mType = QUEUE_TYPE_GRAPHICS;
 		queueDesc.mFlag = QUEUE_FLAG_INIT_MICROPROFILE;
 		addQueue(pRenderer, &queueDesc, &pGraphicsQueue);
-		CmdPoolDesc cmdPoolDesc = {};
-		cmdPoolDesc.pQueue = pGraphicsQueue;
-		addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPool);
-		CmdDesc cmdDesc = {};
-		cmdDesc.pPool = pCmdPool;
-		addCmd_n(pRenderer, &cmdDesc, gImageCount, &ppCmds);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			CmdPoolDesc cmdPoolDesc = {};
+			cmdPoolDesc.pQueue = pGraphicsQueue;
+			addCmdPool(pRenderer, &cmdPoolDesc, &pCmdPools[i]);
+			CmdDesc cmdDesc = {};
+			cmdDesc.pPool = pCmdPools[i];
+			addCmd(pRenderer, &cmdDesc, &pCmds[i]);
+		}
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -366,7 +362,7 @@ class Blending: public IApp
 		//
 		initResourceLoaderInterface(pRenderer);
 
-		if (!gVirtualJoystick.Init(pRenderer, "circlepad", RD_TEXTURES))
+		if (!gVirtualJoystick.Init(pRenderer, "circlepad"))
 			return false;
 
         // INITIALIZE THE USER INTERFACE
@@ -374,7 +370,7 @@ class Blending: public IApp
         if (!gAppUI.Init(pRenderer))
           return false;
 
-        gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf", RD_BUILTIN_FONTS);
+        gAppUI.LoadFont("TitilliumText/TitilliumText-Bold.otf");
 
 		initProfiler();
 
@@ -383,11 +379,11 @@ class Blending: public IApp
 		// INITIALIZE PIPILINE STATES
 		//
 		ShaderLoadDesc planeShader = {};
-		planeShader.mStages[0] = { "plane.vert", NULL, 0, RD_SHADER_SOURCES };
-		planeShader.mStages[1] = { "plane.frag", NULL, 0, RD_SHADER_SOURCES };
+		planeShader.mStages[0] = { "plane.vert", NULL, 0 };
+		planeShader.mStages[1] = { "plane.frag", NULL, 0 };
 		ShaderLoadDesc basicShader = {};
-		basicShader.mStages[0] = { "basic.vert", NULL, 0, RD_SHADER_SOURCES };
-		basicShader.mStages[1] = { "basic.frag", NULL, 0, RD_SHADER_SOURCES };
+		basicShader.mStages[0] = { "basic.vert", NULL, 0 };
+		basicShader.mStages[1] = { "basic.frag", NULL, 0 };
 
 		addShader(pRenderer, &planeShader, &pPlaneDrawShader);
 		addShader(pRenderer, &basicShader, &pSkeletonShader);
@@ -415,7 +411,7 @@ class Blending: public IApp
 		jointVbDesc.mDesc.mSize = jointDataSize;
 		jointVbDesc.pData = pJointPoints;
 		jointVbDesc.ppBuffer = &pJointVertexBuffer;
-		addResource(&jointVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&jointVbDesc, NULL);
 
 		// Generate bone vertex buffer
 		float* pBonePoints;
@@ -428,7 +424,7 @@ class Blending: public IApp
 		boneVbDesc.mDesc.mSize = boneDataSize;
 		boneVbDesc.pData = pBonePoints;
 		boneVbDesc.ppBuffer = &pBoneVertexBuffer;
-		addResource(&boneVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&boneVbDesc, NULL);
 
 		//Generate plane vertex buffer
 		float planePoints[] = { -10.0f, 0.0f, -10.0f, 1.0f, 0.0f, 0.0f, -10.0f, 0.0f, 10.0f,  1.0f, 1.0f, 0.0f,
@@ -442,7 +438,7 @@ class Blending: public IApp
 		planeVbDesc.mDesc.mSize = planeDataSize;
 		planeVbDesc.pData = planePoints;
 		planeVbDesc.ppBuffer = &pPlaneVertexBuffer;
-		addResource(&planeVbDesc, NULL, LOAD_PRIORITY_NORMAL);
+		addResource(&planeVbDesc, NULL);
 
 		BufferLoadDesc ubDesc = {};
 		ubDesc.mDesc.mDescriptors = DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -453,7 +449,7 @@ class Blending: public IApp
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
 			ubDesc.ppBuffer = &pPlaneUniformBuffer[i];
-			addResource(&ubDesc, NULL, LOAD_PRIORITY_NORMAL);
+			addResource(&ubDesc, NULL);
 		}
 
 		/************************************************************************/
@@ -478,28 +474,19 @@ class Blending: public IApp
 		gSkeletonBatcher.Initialize(skeletonRenderDesc);
 
 		// RIGS
-		//
-        PathHandle fullPath = fsGetPathInResourceDirEnum(RD_ANIMATIONS, gStickFigureName);
-
 		// Initialize the rig with the path to its ozz file
-		gStickFigureRig.Initialize(fullPath);
+		gStickFigureRig.Initialize(RD_ANIMATIONS, gStickFigureName);
 
 		// Add the rig to the list of skeletons to render
 		gSkeletonBatcher.AddRig(&gStickFigureRig);
 
 		// CLIPS
 		//
-		fullPath = fsGetPathInResourceDirEnum(RD_ANIMATIONS, gWalkClipName);
+		gWalkClip.Initialize(RD_ANIMATIONS, gWalkClipName, &gStickFigureRig);
 
-		gWalkClip.Initialize(fullPath, &gStickFigureRig);
+		gJogClip.Initialize(RD_ANIMATIONS, gJogClipName, &gStickFigureRig);
 
-		fullPath = fsGetPathInResourceDirEnum(RD_ANIMATIONS, gJogClipName);
-
-		gJogClip.Initialize(fullPath, &gStickFigureRig);
-
-		fullPath = fsGetPathInResourceDirEnum(RD_ANIMATIONS, gRunClipName);
-
-		gRunClip.Initialize(fullPath, &gStickFigureRig);
+		gRunClip.Initialize(RD_ANIMATIONS, gRunClipName, &gStickFigureRig);
 
 		// CLIP CONTROLLERS
 		//
@@ -548,7 +535,7 @@ class Blending: public IApp
 		// Add the GUI Panels/Windows
 		const TextDrawDesc UIPanelWindowTitleTextDesc = { 0, 0xffff00ff, 14 };
 
-		vec2    UIPosition = { mSettings.mWidth * 0.1f, mSettings.mHeight * 0.01f };
+		vec2    UIPosition = { mSettings.mWidth * 0.01f, mSettings.mHeight * 0.15f };
 		vec2    UIPanelSize = { 650, 1000 };
 		GuiDesc guiDesc(UIPosition, UIPanelSize, UIPanelWindowTitleTextDesc);
 		pStandaloneControlsGUIWindow = gAppUI.AddGuiComponent("Blended Animation", &guiDesc);
@@ -807,8 +794,8 @@ class Blending: public IApp
 		waitForAllResourceLoads();
 
 		// Need to free memory;
-		conf_free(pJointPoints);
-		conf_free(pBonePoints);
+		tf_free(pJointPoints);
+		tf_free(pBonePoints);
 
 		// Prepare descriptor sets
 		for (uint32_t i = 0; i < gImageCount; ++i)
@@ -855,8 +842,8 @@ class Blending: public IApp
 
 		removeShader(pRenderer, pSkeletonShader);
 		removeShader(pRenderer, pPlaneDrawShader);
-		removeRootSignature(pRenderer, pRootSignature);
 		removeDescriptorSet(pRenderer, pDescriptorSet);
+		removeRootSignature(pRenderer, pRootSignature);
 
 		for (uint32_t i = 0; i < gImageCount; ++i)
 		{
@@ -865,8 +852,11 @@ class Blending: public IApp
 		}
 		removeSemaphore(pRenderer, pImageAcquiredSemaphore);
 
-		removeCmd_n(pRenderer, gImageCount, ppCmds);
-		removeCmdPool(pRenderer, pCmdPool);
+		for (uint32_t i = 0; i < gImageCount; ++i)
+		{
+			removeCmd(pRenderer, pCmds[i]);
+			removeCmdPool(pRenderer, pCmdPools[i]);
+		}
 
 		exitResourceLoaderInterface(pRenderer);
 		removeQueue(pRenderer, pGraphicsQueue);
@@ -1035,7 +1025,8 @@ class Blending: public IApp
 
 	void Draw()
 	{
-		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &gFrameIndex);
+		uint32_t swapchainImageIndex;
+		acquireNextImage(pRenderer, pSwapChain, pImageAcquiredSemaphore, NULL, &swapchainImageIndex);
 
 		// UPDATE UNIFORM BUFFERS
 		//
@@ -1057,30 +1048,28 @@ class Blending: public IApp
 		if (fenceStatus == FENCE_STATUS_INCOMPLETE)
 			waitForFences(pRenderer, 1, &pNextFence);
 
+		resetCmdPool(pRenderer, pCmdPools[gFrameIndex]);
+
 		// Acquire the main render target from the swapchain
-		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[gFrameIndex];
+		RenderTarget* pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		Semaphore*    pRenderCompleteSemaphore = pRenderCompleteSemaphores[gFrameIndex];
 		Fence*        pRenderCompleteFence = pRenderCompleteFences[gFrameIndex];
-		Cmd*          cmd = ppCmds[gFrameIndex];
+		Cmd*          cmd = pCmds[gFrameIndex];
 		beginCmd(cmd);    // start recording commands
 
 		// start gpu frame profiler
 		cmdBeginGpuFrameProfile(cmd, gGpuProfileToken);
 
 		RenderTargetBarrier barriers[] =    // wait for resource transition
-			{
-				{ pRenderTarget, RESOURCE_STATE_RENDER_TARGET },
-				{ pDepthBuffer, RESOURCE_STATE_DEPTH_WRITE },
-			};
-		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
+		{
+			{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
+		};
+		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 
 		// bind and clear the render target
 		LoadActionsDesc loadActions = {};    // render target clean command
 		loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
-		loadActions.mClearColorValues[0].r = 0.39f;
-		loadActions.mClearColorValues[0].g = 0.41f;
-		loadActions.mClearColorValues[0].b = 0.37f;
-		loadActions.mClearColorValues[0].a = 1.0f;
+		loadActions.mClearColorValues[0] = pRenderTarget->mClearValue;
 		loadActions.mLoadActionDepth = LOAD_ACTION_CLEAR;
 		loadActions.mClearDepth.depth = 1.0f;
 		loadActions.mClearDepth.stencil = 0;
@@ -1114,13 +1103,13 @@ class Blending: public IApp
 		gVirtualJoystick.Draw(cmd, { 1.0f, 1.0f, 1.0f, 1.0f });
 
 		gAppUI.Gui(pStandaloneControlsGUIWindow);    // adds the gui element to AppUI::ComponentsToUpdate list
-        cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
+        float2 txtSize = cmdDrawCpuProfile(cmd, float2(8.0f, 15.0f), &gFrameTimeDraw);
 		gAppUI.DrawText(
-			cmd, float2(8, 40), eastl::string().sprintf("Animation Update %f ms", gAnimationUpdateTimer.GetUSecAverage() / 1000.0f).c_str(),
+			cmd, float2(8.f, txtSize.y + 30.f), eastl::string().sprintf("Animation Update %f ms", gAnimationUpdateTimer.GetUSecAverage() / 1000.0f).c_str(),
 			&gFrameTimeDraw);
 
 #if !defined(__ANDROID__)
-        cmdDrawGpuProfile(cmd, float2(8, 65), gGpuProfileToken);
+        cmdDrawGpuProfile(cmd, float2(8.f, txtSize.y * 2.f + 45.f), gGpuProfileToken, &gFrameTimeDraw);
 #endif
 
 		cmdDrawProfilerUI();
@@ -1131,7 +1120,7 @@ class Blending: public IApp
 
 		// PRESENT THE GRPAHICS QUEUE
 		//
-		barriers[0] = { pRenderTarget, RESOURCE_STATE_PRESENT };
+		barriers[0] = { pRenderTarget, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_PRESENT };
 		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 1, barriers);
 		cmdEndGpuFrameProfile(cmd, gGpuProfileToken);
 		endCmd(cmd);
@@ -1146,13 +1135,15 @@ class Blending: public IApp
 		submitDesc.pSignalFence = pRenderCompleteFence;
 		queueSubmit(pGraphicsQueue, &submitDesc);
 		QueuePresentDesc presentDesc = {};
-		presentDesc.mIndex = gFrameIndex;
+		presentDesc.mIndex = swapchainImageIndex;
 		presentDesc.mWaitSemaphoreCount = 1;
 		presentDesc.ppWaitSemaphores = &pRenderCompleteSemaphore;
 		presentDesc.pSwapChain = pSwapChain;
 		presentDesc.mSubmitDone = true;
 		queuePresent(pGraphicsQueue, &presentDesc);
 		flipProfiler();
+
+		gFrameIndex = (gFrameIndex + 1) % gImageCount;
 	}
 
 	const char* GetName() { return "22_Blending"; }
@@ -1167,7 +1158,8 @@ class Blending: public IApp
 		swapChainDesc.mHeight = mSettings.mHeight;
 		swapChainDesc.mImageCount = gImageCount;
 		swapChainDesc.mColorFormat = getRecommendedSwapchainFormat(true);
-		swapChainDesc.mEnableVsync = false;
+		swapChainDesc.mColorClearValue = { { 0.39f, 0.41f, 0.37f, 1.0f } };
+		swapChainDesc.mEnableVsync = mSettings.mDefaultVSyncEnabled;
 		::addSwapChain(pRenderer, &swapChainDesc, &pSwapChain);
 
 		return pSwapChain != NULL;
@@ -1183,6 +1175,7 @@ class Blending: public IApp
 		depthRT.mClearValue.stencil = 0;
 		depthRT.mDepth = 1;
 		depthRT.mFormat = TinyImageFormat_D32_SFLOAT;
+		depthRT.mStartState = RESOURCE_STATE_DEPTH_WRITE;
 		depthRT.mHeight = mSettings.mHeight;
 		depthRT.mSampleCount = SAMPLE_COUNT_1;
 		depthRT.mSampleQuality = 0;
