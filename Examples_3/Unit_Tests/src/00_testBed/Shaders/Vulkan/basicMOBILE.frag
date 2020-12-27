@@ -1,9 +1,8 @@
 /*
- * Copyright (c) 2018-2021 The Forge Interactive Inc.
- *
+ * 
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
- *
+ * 
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -11,9 +10,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- *
+ * 
  *   http://www.apache.org/licenses/LICENSE-2.0
- *
+ * 
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -24,9 +23,6 @@
 
 #version 450 core
 
-precision highp float;
-precision highp int; 
-#extension GL_EXT_control_flow_attributes : require
 void sincos1(float x, out float s, out float c) { s = sin(x); c = cos(x); }
 void sincos1(vec2 x, out vec2 s, out vec2 c) { s = sin(x); c = cos(x); }
 void sincos1(vec3 x, out vec3 s, out vec3 c) { s = sin(x); c = cos(x); }
@@ -50,14 +46,31 @@ vec4 MulMat(mat4 lhs, vec4 rhs)
     return dst;
 }
 
+#define PI 3.141592654f
 
-layout(location = 0) in vec3 fragInput_POSITION;
-layout(location = 1) in vec3 fragInput_NORMAL;
-layout(location = 2) in vec2 fragInput_TEXCOORD0;
-layout(location = 0) out vec4 rast_FragData0; 
+#define NUM_SHADOW_SAMPLES 4
 
-const float NUM_SHADOW_SAMPLES_INV = float(0.03125);
-const float shadowSamples[64] = {(-0.17466460), (-0.79131840), (-0.129792), (-0.44771160), 0.08863912, (-0.8981690), (-0.58914988), (-0.678163), 0.17484090, (-0.5252063), 0.6483325, (-0.752117), 0.45293192, (-0.384986), 0.09757467, (-0.1166954), 0.3857658, (-0.9096935), 0.56130584, (-0.1283066), 0.768011, (-0.4906538), 0.8499438, (-0.220937), 0.6946555, 0.16058660, 0.9614297, 0.0597522, 0.7986544, 0.53259124, 0.45139648, 0.5592551, 0.2847693, 0.2293397, (-0.2118996), (-0.1609127), (-0.4357893), (-0.3808875), (-0.4662672), (-0.05288446), (-0.139129), 0.23940650, 0.1781853, 0.5254948, 0.4287854, 0.899425, 0.12893490, 0.8724155, (-0.6924323), (-0.2203967), (-0.48997), 0.2795907, (-0.26117242), 0.7359962, (-0.7704172), 0.42331340, (-0.8501040), 0.12639350, (-0.83452672), (-0.499136), (-0.5380967), 0.6264234, (-0.9769312), (-0.15505689)};
+const float NUM_SHADOW_SAMPLES_INV = .03125;
+const float shadowSamples[NUM_SHADOW_SAMPLES * 8] =
+{
+	-0.1746646, -0.7913184,
+	0.08863912, -0.898169,
+	0.1748409, -0.5252063,
+	0.4529319, -0.384986,
+	0.3857658, -0.9096935,
+	0.768011, -0.4906538,
+	0.6946555, 0.1605866,
+	0.7986544, 0.5325912,
+	0.2847693, 0.2293397,
+	-0.4357893, -0.3808875,
+	-0.139129, 0.2394065,
+	0.4287854, 0.899425,
+	-0.6924323, -0.2203967,
+	-0.2611724, 0.7359962,
+	-0.850104, 0.1263935,
+	-0.5380967, 0.6264234
+};
+
 layout(row_major, set = 1, binding = 0) uniform cbPerPass
 {
     mat4 projView;
@@ -78,7 +91,7 @@ struct GLTFTextureProperties
 };
 struct GLTFMaterialData
 {
-    uint mAlphaMode;
+    uint mMaterialType;
     float mAlphaCutoff;
     vec2 mEmissiveGBScale;
     vec4 mBaseColorFactor;
@@ -106,6 +119,12 @@ layout(set = 3, binding = 8) uniform sampler metallicRoughnessSampler;
 layout(set = 3, binding = 9) uniform sampler occlusionMapSampler;
 layout(set = 3, binding = 10) uniform sampler emissiveMapSampler;
 layout(set = 0, binding = 7) uniform sampler clampMiplessLinearSampler;
+
+layout(location = 0) in vec3 fragInput_POSITION;
+layout(location = 1) in vec3 fragInput_NORMAL;
+layout(location = 2) in vec2 fragInput_TEXCOORD0;
+layout(location = 0) out vec4 rast_FragData0; 
+
 struct PsIn
 {
     vec3 pos;
@@ -297,9 +316,9 @@ PSOut HLSLmain(PsIn input1)
 	emissive *= materialData.mEmissiveTextureProperties.mValueScale;
     ((emissive).gb *= (materialData).mEmissiveGBScale);
     vec3 normal = getNormalFromMap((input1).normal, (input1).pos, (input1).texCoord);
-    vec3 metalness = vec3((metallicRoughness).b, (metallicRoughness).b, (metallicRoughness).b);
+    vec3 metalness = vec3((metallicRoughness).r, (metallicRoughness).r, (metallicRoughness).r);
     float roughness = (metallicRoughness).g;
-    if((((materialData).mAlphaMode == 1) && ((materialData).mAlphaCutoff < 1.0) && ((baseColor).a < (materialData).mAlphaCutoff)))
+    if((((materialData).mAlphaCutoff < 1.0) && ((baseColor).a < (materialData).mAlphaCutoff)))
     {
         discard;
     }
@@ -308,7 +327,6 @@ PSOut HLSLmain(PsIn input1)
     vec3 V = normalize(((camPos).xyz - (input1).pos));
     float NoV = max(dot(N, V), float(0.0));
     vec3 result = vec3(0.0, 0.0, 0.0);
-    [[unroll]] 
     for (uint i = uint(0); (i < uint(1)); (++i))
     {
         vec3 L = normalize((lightDirection[i]).xyz);

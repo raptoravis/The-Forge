@@ -1,9 +1,4 @@
-#version 100
-precision mediump float;
-precision mediump int;
-
 /*
- * Copyright (c) 2018-2020 The Forge Interactive Inc.
  * 
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -26,9 +21,37 @@ precision mediump int;
  * under the License.
 */
 
-varying vec4 Color;
-
-void main ()
+cbuffer cbPerPass : register(b0, UPDATE_FREQ_PER_FRAME)
 {
-	gl_FragColor = Color;
+	float4x4	projView;
+	float4x4	shadowLightViewProj;
+	float4      camPos;
+	float4      lightColor[4];
+	float4      lightDirection[3];
+}
+
+struct VSInput
+{
+	float3 Position : POSITION;
+	float2 TexCoord : TEXCOORD0;
+};
+
+struct VSOutput
+{
+	float4 Position : SV_POSITION;
+	float3 WorldPos : POSITION;
+    float2 TexCoord : TEXCOORD;
+};
+
+VSOutput main(VSInput input)
+{
+	VSOutput Out;
+
+	float4 worldPos = float4(input.Position, 1.0f);
+	worldPos.xyz *= 3.0;
+	Out.Position = mul(projView, worldPos);
+	Out.WorldPos = worldPos.xyz;
+	Out.TexCoord = input.TexCoord;
+
+	return Out;
 }

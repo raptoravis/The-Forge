@@ -30,289 +30,40 @@
     <ClCompile Include="..\src\00_testBed\00_testBed.cpp" />
   </ItemGroup>
   <ItemGroup>
- <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\base.frag">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</LinkObjects>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</ExcludedFromBuild>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Message>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Outputs>
-    </CustomBuild>
-    <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\base.vert">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</LinkObjects>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</ExcludedFromBuild>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Message>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Outputs>
-    </CustomBuild>  
-    <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\basic.frag">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</LinkObjects>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</ExcludedFromBuild>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Message>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Outputs>
-    </CustomBuild>
-    <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\basic.vert">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</LinkObjects>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</ExcludedFromBuild>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Message>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Outputs>
-    </CustomBuild>
-    <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\skybox.frag">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</LinkObjects>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</ExcludedFromBuild>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Message>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Outputs>
-    </CustomBuild>
-    <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\skybox.vert">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">"$(VULKAN_SDK)\bin\glslangValidator.exe" -V "%(FullPath)" "-DUPDATE_FREQ_NONE=set = 0" "-DUPDATE_FREQ_PER_FRAME=set = 1" "-DUPDATE_FREQ_PER_BATCH=set = 2" "-DUPDATE_FREQ_PER_DRAW=set = 3" -o "%(FullPath)\..\Binary\%(Filename)%(Extension).bin"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">Compiling %(Identity) to spirv</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">%(FullPath)\..\Binary\%(Filename)%(Extension).bin</Outputs>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</LinkObjects>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</ExcludedFromBuild>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Message>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">false</LinkObjects>
-      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">false</LinkObjects>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
-      </Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
-      </Outputs>
-    </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
     <None Include="..\src\00_testBed\Shaders\D3D12\basic.frag" />
     <None Include="..\src\00_testBed\Shaders\D3D12\basic.vert" />
-    <None Include="..\src\00_testBed\Shaders\D3D12\skybox.frag" />
-    <None Include="..\src\00_testBed\Shaders\D3D12\skybox.vert" />
-    <None Include="..\src\00_testBed\Shaders\D3D12\crash.vert" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\floor.frag" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\floor.vert" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\FXAA.frag" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\Triangular.vert" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\vignette.frag" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\watermark.frag" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\watermark.vert" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\zPass.vert" />
+    <None Include="..\src\00_testBed\Shaders\D3D12\zPassFloor.vert" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\basic.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\basic.vert" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\basicMOBILE.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\floor.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\floor.vert" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\floorMOBILE.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\FXAA.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\Triangular.vert" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\vignette.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\watermark.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\watermark.vert" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\zPass.vert" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\zPassFloor.vert" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\..\Common_3\ThirdParty\OpenSource\cgltf\cgltf.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{3BD9C9A4-D26E-414F-B308-6D04C14693E7}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>Samples_GLFW</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
+    <ProjectName>00_testBed</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'" Label="Configuration">
@@ -381,43 +132,42 @@
     <LinkIncremental>true</LinkIncremental>
     <IntDir>$(SolutionDir)\$(Platform)\$(Configuration)\Intermediate\$(ProjectName)\</IntDir>
     <IncludePath>$(VULKAN_SDK)\Include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(VULKAN_SDK)\Lib;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(VULKAN_SDK)\Lib;$(LibraryPath);</LibraryPath>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugDx|x64'">
     <LinkIncremental>true</LinkIncremental>
     <IntDir>$(SolutionDir)\$(Platform)\$(Configuration)\Intermediate\$(ProjectName)\</IntDir>
     <IncludePath>$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath);</LibraryPath>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
-    <ExtensionsToDeleteOnClean>$(ExtensionsToDeleteOnClean)</ExtensionsToDeleteOnClean>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugDx11|x64'">
     <LinkIncremental>true</LinkIncremental>
     <IntDir>$(SolutionDir)\$(Platform)\$(Configuration)\Intermediate\$(ProjectName)\</IntDir>
     <IncludePath>$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath);</LibraryPath>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseVk|x64'">
     <LinkIncremental>false</LinkIncremental>
     <IntDir>$(SolutionDir)\$(Platform)\$(Configuration)\Intermediate\$(ProjectName)\</IntDir>
     <IncludePath>$(VULKAN_SDK)\Include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(VULKAN_SDK)\Lib;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(VULKAN_SDK)\Lib;$(LibraryPath);</LibraryPath>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDx|x64'">
     <LinkIncremental>false</LinkIncremental>
     <IntDir>$(SolutionDir)\$(Platform)\$(Configuration)\Intermediate\$(ProjectName)\</IntDir>
     <IncludePath>$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath);</LibraryPath>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseDx11|x64'">
     <LinkIncremental>false</LinkIncremental>
     <IntDir>$(SolutionDir)\$(Platform)\$(Configuration)\Intermediate\$(ProjectName)\</IntDir>
     <IncludePath>$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)\$(Platform)\$(Configuration);$(LibraryPath);</LibraryPath>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='DebugVk|x64'">
@@ -452,6 +202,11 @@ if $(Configuration) == ReleaseDx11 set SHADER_DIR=D3D11
 if $(Configuration) == DebugVk set SHADER_DIR=Vulkan
 if $(Configuration) == ReleaseVk set SHADER_DIR=Vulkan
 
+
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.gltf" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.bin" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\*.basis" "$(OutDir)Textures\"
+
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\Skybox_*.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\circlepad.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Fonts\*.ttf" "$(OutDir)Fonts\"
@@ -460,6 +215,7 @@ xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\UI\Shaders\%SHADER_DIR%\*.*" 
 xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\Text\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\GPUCfg\*.*" "$(OutDir)GPUCfg\"
+xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Scripts\*.lua" "$(OutDir)Scripts\"
 
 xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
@@ -505,6 +261,11 @@ if $(Configuration) == ReleaseDx11 set SHADER_DIR=D3D11
 if $(Configuration) == DebugVk set SHADER_DIR=Vulkan
 if $(Configuration) == ReleaseVk set SHADER_DIR=Vulkan
 
+
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.gltf" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.bin" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\*.basis" "$(OutDir)Textures\"
+
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\Skybox_*.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\circlepad.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Fonts\*.ttf" "$(OutDir)Fonts\"
@@ -513,6 +274,7 @@ xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\UI\Shaders\%SHADER_DIR%\*.*" 
 xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\Text\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\GPUCfg\*.*" "$(OutDir)GPUCfg\"
+xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Scripts\*.lua" "$(OutDir)Scripts\"
 
 xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
@@ -552,7 +314,7 @@ xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Comm
       <AdditionalOptions>/ENTRY:mainCRTStartup %(AdditionalOptions)</AdditionalOptions>
       <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
       <AdditionalLibraryDirectories>$(GLFW_DIR)\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>LuaManager.lib;Xinput9_1_0.lib;ws2_32.lib;gainputstatic.lib;RendererDX11.lib;OS.lib;%(AdditionalDependencies);</AdditionalDependencies>
+      <AdditionalDependencies>Xinput9_1_0.lib;ws2_32.lib;gainputstatic.lib;RendererDX11.lib;OS.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions>/ignore:4099</AdditionalOptions>
     </Link>
     <PostBuildEvent>
@@ -562,6 +324,11 @@ if $(Configuration) == ReleaseDx11 set SHADER_DIR=D3D11
 if $(Configuration) == DebugVk set SHADER_DIR=Vulkan
 if $(Configuration) == ReleaseVk set SHADER_DIR=Vulkan
 
+
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.gltf" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.bin" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\*.basis" "$(OutDir)Textures\"
+
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\Skybox_*.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\circlepad.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Fonts\*.ttf" "$(OutDir)Fonts\"
@@ -570,6 +337,7 @@ xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\UI\Shaders\%SHADER_DIR%\*.*" 
 xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\Text\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\GPUCfg\*.*" "$(OutDir)GPUCfg\"
+xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Scripts\*.lua" "$(OutDir)Scripts\"
 
 xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
@@ -625,6 +393,11 @@ if $(Configuration) == ReleaseDx11 set SHADER_DIR=D3D11
 if $(Configuration) == DebugVk set SHADER_DIR=Vulkan
 if $(Configuration) == ReleaseVk set SHADER_DIR=Vulkan
 
+
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.gltf" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.bin" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\*.basis" "$(OutDir)Textures\"
+
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\Skybox_*.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\circlepad.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Fonts\*.ttf" "$(OutDir)Fonts\"
@@ -633,6 +406,7 @@ xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\UI\Shaders\%SHADER_DIR%\*.*" 
 xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\Text\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\GPUCfg\*.*" "$(OutDir)GPUCfg\"
+xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Scripts\*.lua" "$(OutDir)Scripts\"
 
 xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
@@ -682,6 +456,11 @@ if $(Configuration) == ReleaseDx11 set SHADER_DIR=D3D11
 if $(Configuration) == DebugVk set SHADER_DIR=Vulkan
 if $(Configuration) == ReleaseVk set SHADER_DIR=Vulkan
 
+
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.gltf" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.bin" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\*.basis" "$(OutDir)Textures\"
+
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\Skybox_*.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\circlepad.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Fonts\*.ttf" "$(OutDir)Fonts\"
@@ -690,6 +469,7 @@ xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\UI\Shaders\%SHADER_DIR%\*.*" 
 xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\Text\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\GPUCfg\*.*" "$(OutDir)GPUCfg\"
+xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Scripts\*.lua" "$(OutDir)Scripts\"
 
 xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
@@ -733,7 +513,7 @@ xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Comm
       <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
       <AdditionalOptions>/ENTRY:mainCRTStartup %(AdditionalOptions)</AdditionalOptions>
       <AdditionalLibraryDirectories>$(GLFW_DIR)\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>LuaManager.lib;Xinput9_1_0.lib;ws2_32.lib;gainputstatic.lib;RendererDX11.lib;OS.lib;%(AdditionalDependencies);</AdditionalDependencies>
+      <AdditionalDependencies>Xinput9_1_0.lib;ws2_32.lib;gainputstatic.lib;RendererDX11.lib;OS.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalOptions>/ignore:4099</AdditionalOptions>
     </Link>
     <PostBuildEvent>
@@ -743,6 +523,11 @@ if $(Configuration) == ReleaseDx11 set SHADER_DIR=D3D11
 if $(Configuration) == DebugVk set SHADER_DIR=Vulkan
 if $(Configuration) == ReleaseVk set SHADER_DIR=Vulkan
 
+
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.gltf" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Meshes\*.bin" "$(OutDir)Meshes\"
+xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\*.basis" "$(OutDir)Textures\"
+
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\Skybox_*.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Textures\circlepad.dds" "$(OutDir)Textures\"
 xcopy /Y /S /D "$(ProjectDir)..\UnitTestResources\Fonts\*.ttf" "$(OutDir)Fonts\"
@@ -751,6 +536,7 @@ xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\UI\Shaders\%SHADER_DIR%\*.*" 
 xcopy /Y /S /D "$(ProjectDir)..\..\..\Middleware_3\Text\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Shaders\%SHADER_DIR%\*.*" "$(OutDir)Shaders\"
 xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\GPUCfg\*.*" "$(OutDir)GPUCfg\"
+xcopy /Y /S /D "$(ProjectDir)..\src\$(ProjectName)\Scripts\*.lua" "$(OutDir)Scripts\"
 
 xcopy /Y /D "$(SolutionDir)$(Platform)\$(Configuration)\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>

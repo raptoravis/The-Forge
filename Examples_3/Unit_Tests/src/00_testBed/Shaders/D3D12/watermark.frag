@@ -1,5 +1,4 @@
 /*
- * Copyright (c) 2018-2021 The Forge Interactive Inc.
  * 
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -22,34 +21,17 @@
  * under the License.
 */
 
-// Shader for Skybox in Unit Test 01 - Transformations
+Texture2D sceneTexture		: register(t6);
 
-#define MAX_PLANETS 20
+SamplerState clampMiplessLinearSampler : register(s7);
 
-cbuffer uniformBlock : register(b0)
+struct VSOutput
 {
-    float4x4 mvp;
-    float4x4 toWorld[MAX_PLANETS];
-    float4 color[MAX_PLANETS];
-
-    // Point Light Information
-    float3 lightPosition;
-    float3 lightColor;
-};
-
-struct VSOutput {
 	float4 Position : SV_POSITION;
-    float4 TexCoord : TEXCOORD;
+    float2 TexCoord : TEXCOORD;
 };
 
-VSOutput main(float4 Position : POSITION)
+float4 main(VSOutput input) : SV_TARGET
 {
-	VSOutput result;
- 
-    float4 p = float4(Position.x*9, Position.y*9, Position.z*9, 1.0);
-    float4x4 m =  mvp;
-    p = mul(m,p);
-    result.Position = p.xyww;
-    result.TexCoord = float4(Position.x, Position.y, Position.z,Position.w);
-	return result;
+	return sceneTexture.Sample(clampMiplessLinearSampler, input.TexCoord);
 }

@@ -1,7 +1,4 @@
-#version 450 core
-
 /*
- * Copyright (c) 2018-2021 The Forge Interactive Inc.
  * 
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
@@ -24,45 +21,21 @@
  * under the License.
 */
 
-#ifdef PREDEFINED_MACRO
-#include "stdmacro_defs.inc"
-#endif
-
-#define MAX_PLANETS 20
-
-layout(location = 0) in vec4 vs_in_position;
-
-layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform uniformBlock{
-	uniform mat4 viewProject;
-    uniform mat4 toWorld[MAX_PLANETS];
-    uniform vec4 color[MAX_PLANETS];
-
-    // Point Light Information
-    uniform vec3 lightPosition;
-    uniform vec3 lightColor;
+struct VSInput
+{
+   float3 Position : POSITION;
+   float2 TexCoord : TEXCOORD;
 };
 
-out gl_PerVertex
-{
-  vec4 gl_Position;
-
+struct VSOutput {
+	float4 Position : SV_POSITION;
+    float2 TexCoord : TEXCOORD;
 };
 
-layout(location = 0) out INVOCATION
+VSOutput main(VSInput input)
 {
-  vec4 texcoord;
-  int side;
-} vs_out;
-
-
-void main(void)
-{
-  vec4 p = vec4(vs_in_position.xyz,1.0);
-  mat4 m = viewProject;
-  m[3] = vec4(0.0, 0.0, 0.0, 1.0);
-  p = m * p;
-  gl_Position = vec4(p.x, p.y, p.w, p.w);
-  vs_out.texcoord = vs_in_position;
-  vs_out.side = int(vs_in_position.w);
+	VSOutput Out;
+	Out.Position = float4(input.Position, 1.0);
+	Out.TexCoord = input.TexCoord;
+	return Out;
 }
-

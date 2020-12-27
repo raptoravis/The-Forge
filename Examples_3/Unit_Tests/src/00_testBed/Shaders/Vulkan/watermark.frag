@@ -1,9 +1,9 @@
 /*
  * Copyright (c) 2018-2021 The Forge Interactive Inc.
- * 
+ *
  * This file is part of The-Forge
  * (see https://github.com/ConfettiFX/The-Forge).
- * 
+ *
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -11,9 +11,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -22,34 +22,30 @@
  * under the License.
 */
 
-// Shader for Skybox in Unit Test 01 - Transformations
+#version 450 core
 
-#define MAX_PLANETS 20
+precision highp float;
+precision highp int; 
 
-cbuffer uniformBlock : register(b0, UPDATE_FREQ_PER_FRAME)
+layout(location = 0) in vec2 fragInput_TEXCOORD;
+layout(location = 0) out vec4 rast_FragData0; 
+
+layout(set = 0, binding = 6) uniform texture2D sceneTexture;
+layout(set = 0, binding = 7) uniform sampler clampMiplessLinearSampler;
+struct VSOutput
 {
-    float4x4 mvp;
-    float4x4 toWorld[MAX_PLANETS];
-    float4 color[MAX_PLANETS];
-
-    // Point Light Information
-    float3 lightPosition;
-    float3 lightColor;
+    vec4 Position;
+    vec2 TexCoord;
 };
-
-struct VSOutput {
-	float4 Position : SV_POSITION;
-    float4 TexCoord : TEXCOORD;
-};
-
-VSOutput main(float4 Position : POSITION)
+vec4 HLSLmain(VSOutput input1)
 {
-	VSOutput result;
- 
-    float4 p = float4(Position.x*9, Position.y*9, Position.z*9, 1.0);
-    float4x4 m =  mvp;
-    p = mul(m,p);
-    result.Position = p.xyww;
-    result.TexCoord = float4(Position.x, Position.y, Position.z,Position.w);
-	return result;
+    return texture(sampler2D(sceneTexture, clampMiplessLinearSampler), (input1).TexCoord);
+}
+void main()
+{
+    VSOutput input1;
+    input1.Position = vec4(gl_FragCoord.xyz, 1.0 / gl_FragCoord.w);
+    input1.TexCoord = fragInput_TEXCOORD;
+    vec4 result = HLSLmain(input1);
+    rast_FragData0 = result;
 }

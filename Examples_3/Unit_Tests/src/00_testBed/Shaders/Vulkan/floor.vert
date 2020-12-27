@@ -38,18 +38,10 @@ vec4 MulMat(mat4 lhs, vec4 rhs)
 
 
 layout(location = 0) in vec3 POSITION;
-layout(location = 1) in vec3 NORMAL;
-layout(location = 2) in vec2 TEXCOORD0;
+layout(location = 1) in vec2 TEXCOORD0;
 layout(location = 0) out vec3 vertOutput_POSITION;
-layout(location = 1) out vec3 vertOutput_NORMAL;
-layout(location = 2) out vec2 vertOutput_TEXCOORD0;
+layout(location = 1) out vec2 vertOutput_TEXCOORD;
 
-struct VsIn
-{
-    vec3 position;
-    vec3 normal;
-    vec2 texCoord;
-};
 layout(row_major, set = 1, binding = 0) uniform cbPerPass
 {
     mat4 projView;
@@ -59,46 +51,34 @@ layout(row_major, set = 1, binding = 0) uniform cbPerPass
     vec4 lightDirection[3];
 };
 
-layout(row_major, push_constant) uniform cbRootConstants_Block
+struct VSInput
 {
-    uint nodeIndex;
-} cbRootConstants;
-
-layout(row_major, set = 0, binding = 0) buffer modelToWorldMatrices
-{
-    mat4 modelToWorldMatrices_Data[];
+    vec3 Position;
+    vec2 TexCoord;
 };
-
-struct PsIn
+struct VSOutput
 {
-    vec3 pos;
-    vec3 normal;
-    vec2 texCoord;
-    vec4 position;
+    vec4 Position;
+    vec3 WorldPos;
+    vec2 TexCoord;
 };
-
-PsIn HLSLmain(VsIn In)
+VSOutput HLSLmain(VSInput input1)
 {
-    mat4 modelToWorld = modelToWorldMatrices_Data[cbRootConstants.nodeIndex];
-    PsIn Out;
-    vec4 inPos = vec4(In.position.xyz, 1.0);
-    vec3 inNormal = In.normal;
-    vec4 worldPosition = MulMat(modelToWorld,inPos);
-    ((Out).position = MulMat(projView,worldPosition));
-    ((Out).pos = (worldPosition).xyz);
-    ((Out).normal = normalize(MulMat(modelToWorld, vec4(inNormal, 0)).xyz));
-    ((Out).texCoord = vec2(((In).texCoord).xy));
+    VSOutput Out;
+    vec4 worldPos = vec4((input1).Position, 1.0);
+    ((worldPos).xyz *= vec3(3.0));
+    ((Out).Position = MulMat(projView,worldPos));
+    ((Out).WorldPos = (worldPos).xyz);
+    ((Out).TexCoord = (input1).TexCoord);
     return Out;
 }
 void main()
 {
-    VsIn In;
-    In.position = POSITION;
-    In.normal = NORMAL;
-    In.texCoord = TEXCOORD0;
-    PsIn result = HLSLmain(In);
-    vertOutput_POSITION = result.pos;
-    vertOutput_NORMAL = result.normal;
-    vertOutput_TEXCOORD0 = result.texCoord;
-    gl_Position = result.position;
+    VSInput input1;
+    input1.Position = POSITION;
+    input1.TexCoord = TEXCOORD0;
+    VSOutput result = HLSLmain(input1);
+    gl_Position = result.Position;
+    vertOutput_POSITION = result.WorldPos;
+    vertOutput_TEXCOORD = result.TexCoord;
 }

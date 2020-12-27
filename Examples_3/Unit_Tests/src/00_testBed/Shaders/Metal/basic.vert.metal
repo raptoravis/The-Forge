@@ -22,64 +22,93 @@
  * under the License.
 */
 
-// Shader for simple shading with a point light
-// for planets in Unit Test 01 - Transformations
-
 #include <metal_stdlib>
 using namespace metal;
 
-#define MAX_PLANETS 20
-
-struct UniformBlock0
+struct Vertex_Shader
 {
-	float4x4 mvp;
-    float4x4 toWorld[MAX_PLANETS];
-    float4 color[MAX_PLANETS];
+    struct VsIn
+    {
+        float4 position;
+        float3 normal;
+        float2 texCoord;
+    };
+    struct Uniforms_cbPerPass
+    {
+        float4x4 projView;
+        float4x4 shadowLightViewProj;
+        float4 camPos;
+        array<float4, 4> lightColor;
+        array<float4, 3> lightDirection;
+    };
+    constant Uniforms_cbPerPass& cbPerPass;
+    struct Uniforms_cbRootConstants
+    {
+        uint nodeIndex;
+    };
+    constant Uniforms_cbRootConstants& cbRootConstants;
+    constant float4x4* modelToWorldMatrices;
+    struct PsIn
+    {
+        float3 pos;
+        float3 normal;
+        float2 texCoord;
+        float4 position;
+    };
+    PsIn main(VsIn In)
+    {
+        float4x4 modelToWorld = modelToWorldMatrices[cbRootConstants.nodeIndex];
+        PsIn Out;
+        float4 inPos = float4(((In).position).xyz, 1.0);
+        float3 inNormal = normalize((modelToWorld * float4(In.normal,0)).xyz);
+        float4 worldPosition = ((modelToWorld)*(inPos));
+        ((Out).position = ((cbPerPass.projView)*(worldPosition)));
+        ((Out).pos = (worldPosition).xyz);
+        ((Out).normal = inNormal);
+        ((Out).texCoord = float2(((In).texCoord).xy));
+        return Out;
+    };
 
-    // Point Light Information
-    packed_float3 lightPosition;
-    float _pad1;  // vec3 in the c++ side are detected as 4 x floats (due to simd use). We add padding here to match the struct sizes.
-    packed_float3 lightColor;
-    float _pad2;  // vec3 in the c++ side are detected as 4 x floats (due to simd use). We add padding here to match the struct sizes.
+    Vertex_Shader(constant Uniforms_cbPerPass& cbPerPass, constant Uniforms_cbRootConstants& cbRootConstants, constant float4x4* modelToWorldMatrices) :
+        cbPerPass(cbPerPass), cbRootConstants(cbRootConstants), modelToWorldMatrices(modelToWorldMatrices)
+    {}
 };
 
-struct VSInput
+struct main_input
 {
-    float4 Position [[attribute(0)]];
-    float4 Normal   [[attribute(1)]];
+    float4 POSITION [[attribute(0)]];
+    float3 NORMAL [[attribute(1)]];
+    float2 TEXCOORD0 [[attribute(2)]];
 };
 
-struct VSOutput {
-	float4 Position [[position]];
-    float4 Color;
+struct main_output
+{
+    float3 POSITION;
+    float3 NORMAL;
+    float2 TEXCOORD0;
+    float4 SV_Position [[position]];
 };
 
-vertex VSOutput stageMain(VSInput input                     [[stage_in]],
-                       uint InstanceID                      [[instance_id]],
-                       constant UniformBlock0& uniformBlock [[buffer(0)]]
-)
+vertex main_output stageMain(
+	main_input inputData [[stage_in]],
+	constant float4x4* modelToWorldMatrices          [[buffer(0)]],
+	sampler clampMiplessLinearSampler                [[sampler(0)]],
+	texture2d<float> ShadowTexture                   [[texture(0)]],
+
+	constant Vertex_Shader::Uniforms_cbPerPass& cbPerPass [[buffer(1)]],
+
+    constant Vertex_Shader::Uniforms_cbRootConstants& cbRootConstants [[buffer(3)]])
 {
-    VSOutput result;
-    float4x4 tempMat = uniformBlock.mvp * uniformBlock.toWorld[InstanceID];
-    result.Position = tempMat * input.Position;
-    
-    float4 normal = normalize(uniformBlock.toWorld[InstanceID] * float4(input.Normal.xyz, 0.0f)); // Assume uniform scaling
-    float4 pos = uniformBlock.toWorld[InstanceID] * float4(input.Position.xyz, 1.0f);
-
-    float lightIntensity = 1.0f;
-    float ambientCoeff = 0.4;
-
-    float3 lightDir;
-
-    if (uniformBlock.color[InstanceID].w == 0) // Special case for Sun, so that it is lit from its top
-        lightDir = float3(0.0f, 1.0f, 0.0f);
-    else
-        lightDir = normalize(uniformBlock.lightPosition - pos.xyz);
-
-    float3 baseColor = uniformBlock.color[InstanceID].xyz;
-    float3 blendedColor = uniformBlock.lightColor * baseColor * lightIntensity;
-    float3 diffuse = blendedColor * max(dot(normal.xyz, lightDir), 0.0);
-    float3 ambient = baseColor * ambientCoeff;
-    result.Color = float4(diffuse + ambient, 1.0);
-    return result;
+    Vertex_Shader::VsIn In0;
+    In0.position = inputData.POSITION;
+    In0.normal = inputData.NORMAL;
+    In0.texCoord = inputData.TEXCOORD0;
+    Vertex_Shader main(cbPerPass, cbRootConstants, modelToWorldMatrices);
+    Vertex_Shader::PsIn result = main.main(In0);
+    main_output output;
+    output.POSITION = result.pos;
+    output.NORMAL = result.normal;
+    output.TEXCOORD0 = result.texCoord;
+    output.SV_Position = result.position;
+    return output;
 }
