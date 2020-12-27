@@ -14,92 +14,94 @@
 #define MAX_SHININESS     127.75
 #define MAX_FRESNEL_POWER   5.0
 
-layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform uniformBlock{
-uniform float osg_FrameTime;
+layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform uniformBlock {
+	uniform float osg_FrameTime;
 
-uniform vec2 pi;
-uniform vec2 gamma;
+	uniform vec2 pi;
+	uniform vec2 gamma;
 
-uniform mat4 trans_world_to_view;
-uniform mat4 trans_view_to_world;
+	uniform mat4 trans_world_to_view;
+	uniform mat4 trans_view_to_world;
 
-
-
-
-uniform vec2 normalMapsEnabled;
-uniform vec2 fresnelEnabled;
-uniform vec2 rimLightEnabled;
-uniform vec2 blinnPhongEnabled;
-uniform vec2 celShadingEnabled;
-uniform vec2 flowMapsEnabled;
-uniform vec2 specularOnly;
-uniform vec2 isParticle;
-uniform vec2 isWater;
-uniform vec2 sunPosition;
-
+	uniform vec2 normalMapsEnabled;
+	uniform vec2 fresnelEnabled;
+	uniform vec2 rimLightEnabled;
+	uniform vec2 blinnPhongEnabled;
+	uniform vec2 celShadingEnabled;
+	uniform vec2 flowMapsEnabled;
+	uniform vec2 specularOnly;
+	uniform vec2 isParticle;
+	uniform vec2 isWater;
+	uniform vec2 sunPosition;
 };
 
-uniform struct
-  { vec4 ambient
-  ; vec4 diffuse
-  ; vec4 emission
-  ; vec3 specular
-  ; float shininess
-  ;
-  } p3d_Material;
+struct material_t 
+{ 
+  vec4 ambient; 
+  vec4 diffuse; 
+  vec4 emission; 
+  vec3 specular; 
+  float shininess;
+};
 
-uniform struct
-  { vec4 ambient
-  ;
-  } p3d_LightModel;
+layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform materialBlock {
+	material_t p3d_Material;
+};
 
-uniform struct p3d_LightSourceParameters
-  { vec4 color
+struct p3d_LightModel
+{ 
+  vec4 ambient;
+};
 
-  ; vec4 ambient
-  ; vec4 diffuse
-  ; vec4 specular
 
-  ; vec4 position
+struct LightSourceParameters_t
+{ 
+	vec4 color  ; 
+	vec4 ambient  ; 
+	vec4 diffuse  ; 
+	vec4 specular  ; 
+	vec4 position  ; 
+	vec3  spotDirection  ; 
+	float spotExponent  ; 
+	float spotCutoff  ; 
+	float spotCosCutoff  ; 
+	float constantAttenuation  ; 
+	float linearAttenuation  ; 
+	float quadraticAttenuation  ; 
+	vec3 attenuation  ; 
 
-  ; vec3  spotDirection
-  ; float spotExponent
-  ; float spotCutoff
-  ; float spotCosCutoff
+	mat4 shadowViewMatrix  ;
+};
+  
 
-  ; float constantAttenuation
-  ; float linearAttenuation
-  ; float quadraticAttenuation
+layout (std140, UPDATE_FREQ_PER_FRAME, binding=1) uniform lightSourceParameters {
+	LightSourceParameters_t p3d_LightSource[NUMBER_OF_LIGHTS];
+};
 
-  ; vec3 attenuation
+layout (UPDATE_FREQ_PER_FRAME, binding=2) uniform sampler2DShadow shadowMap[NUMBER_OF_LIGHTS]  ;   
 
-  ; sampler2DShadow shadowMap
+layout (UPDATE_FREQ_PER_FRAME, binding=3) uniform sampler2D p3d_Texture0;
+layout (UPDATE_FREQ_PER_FRAME, binding=4) uniform sampler2D p3d_Texture1;
+layout (UPDATE_FREQ_PER_FRAME, binding=5) uniform sampler2D p3d_Texture2;
+layout (UPDATE_FREQ_PER_FRAME, binding=6) uniform sampler2D flowTexture;
+layout (UPDATE_FREQ_PER_FRAME, binding=7) uniform sampler2D ssaoBlurTexture;
 
-  ; mat4 shadowViewMatrix
-  ;
-  } p3d_LightSource[NUMBER_OF_LIGHTS];
+layout(location=0) in vec4 vertexColor;
 
-uniform sampler2D p3d_Texture0;
-uniform sampler2D p3d_Texture1;
-uniform sampler2D p3d_Texture2;
-uniform sampler2D flowTexture;
-uniform sampler2D ssaoBlurTexture;
 
-in vec4 vertexColor;
+layout(location=1) in vec4 vertexInShadowSpaces[NUMBER_OF_LIGHTS];
 
-in vec4 vertexInShadowSpaces[NUMBER_OF_LIGHTS];
+layout(location=5) in vec4 vertexPosition;
 
-in vec4 vertexPosition;
+layout(location=6) in vec3 vertexNormal;
+layout(location=7) in vec3 binormal;
+layout(location=8) in vec3 tangent;
 
-in vec3 vertexNormal;
-in vec3 binormal;
-in vec3 tangent;
+layout(location=9) in vec2 diffuseCoord;
+layout(location=10) in vec2 normalCoord;
 
-in vec2 diffuseCoord;
-in vec2 normalCoord;
-
-out vec4 out0;
-out vec4 out1;
+layout(location=0) out vec4 out0;
+layout(location=1) out vec4 out1;
 
 void main() {
   vec3  shadowColor   = pow(vec3(0.149, 0.220, 0.227), vec3(gamma.x));
@@ -249,7 +251,7 @@ void main() {
 
     diffuseTemp.rgb *= (spotExponent <= 0.0 ? 1.0 : pow(unitLightDirectionDelta, spotExponent));
 
-    vec2  shadowMapSize = textureSize(p3d_LightSource[i].shadowMap, 0);
+    vec2  shadowMapSize = textureSize(shadowMap[i], 0);
     float inShadow      = 0.0;
     float count         = 0.0;
 
@@ -258,7 +260,7 @@ void main() {
         inShadow +=
           ( 1.0
           - textureProj
-              ( p3d_LightSource[i].shadowMap
+              ( shadowMap[i]
               , vertexInShadowSpaces[i] + vec4(vec2(si, sj) / shadowMapSize, vec2(0.0))
               )
           );

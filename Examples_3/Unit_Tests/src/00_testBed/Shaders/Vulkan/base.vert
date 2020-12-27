@@ -12,58 +12,58 @@
 
 #define NUMBER_OF_LIGHTS 4
 
-uniform mat4 p3d_ModelViewMatrix;
-uniform mat4 p3d_ProjectionMatrix;
-uniform mat3 p3d_NormalMatrix;
+layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform uniformBlock {
+	uniform mat4 p3d_ModelViewMatrix;
+	uniform mat4 p3d_ProjectionMatrix;
+	uniform mat3 p3d_NormalMatrix;
+};
 
-uniform struct p3d_LightSourceParameters
-  { vec4 color
+struct p3d_LightSourceParameters
+{ 
+	vec4 color  ; 
+	vec4 ambient  ; 
+	vec4 diffuse  ; 
+	vec4 specular  ; 
+	vec4 position  ; 
+	vec3  spotDirection  ; 
+	float spotExponent  ; 
+	float spotCutoff  ; 
+	float spotCosCutoff  ; 
+	float constantAttenuation  ; 
+	float linearAttenuation  ; 
+	float quadraticAttenuation  ; 
+	vec3 attenuation  ; 
 
-  ; vec4 ambient
-  ; vec4 diffuse
-  ; vec4 specular
+	mat4 shadowViewMatrix  ;
+};
+  
 
-  ; vec4 position
+layout (std140, UPDATE_FREQ_PER_FRAME, binding=1) uniform lightSourceParameters {
+ p3d_LightSourceParameters p3d_LightSource[NUMBER_OF_LIGHTS];
+};
 
-  ; vec3  spotDirection
-  ; float spotExponent
-  ; float spotCutoff
-  ; float spotCosCutoff
+layout(location = 0) in vec4 p3d_Vertex;
+layout(location = 1) in vec3 p3d_Normal;
 
-  ; float constantAttenuation
-  ; float linearAttenuation
-  ; float quadraticAttenuation
+layout(location = 2) in vec4 p3d_Color;
 
-  ; vec3 attenuation
+layout(location = 3) in vec2 p3d_MultiTexCoord0;
+layout(location = 4) in vec2 p3d_MultiTexCoord1;
 
-  ; sampler2DShadow shadowMap
+layout(location = 5) in vec3 p3d_Binormal;
+layout(location = 6) in vec3 p3d_Tangent;
 
-  ; mat4 shadowViewMatrix
-  ;
-  } p3d_LightSource[NUMBER_OF_LIGHTS];
+layout(location = 0) out vec4 vertexPosition;
+layout(location = 1) out vec4 vertexColor;
 
-in vec4 p3d_Vertex;
-in vec3 p3d_Normal;
+layout(location = 2) out vec3 vertexNormal;
+layout(location = 3) out vec3 binormal;
+layout(location = 4) out vec3 tangent;
 
-in vec4 p3d_Color;
+layout(location = 5) out vec2 normalCoord;
+layout(location = 6) out vec2 diffuseCoord;
 
-in vec2 p3d_MultiTexCoord0;
-in vec2 p3d_MultiTexCoord1;
-
-in vec3 p3d_Binormal;
-in vec3 p3d_Tangent;
-
-out vec4 vertexPosition;
-out vec4 vertexColor;
-
-out vec3 vertexNormal;
-out vec3 binormal;
-out vec3 tangent;
-
-out vec2 normalCoord;
-out vec2 diffuseCoord;
-
-out vec4 vertexInShadowSpaces[NUMBER_OF_LIGHTS];
+layout(location = 7) out vec4 vertexInShadowSpaces[NUMBER_OF_LIGHTS];
 
 void main() {
   vertexColor    = p3d_Color;
