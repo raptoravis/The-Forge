@@ -16,6 +16,12 @@
     <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\skybox.vert">
       <Filter>Shaders</Filter>
     </CustomBuild>
+    <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\base.frag">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
+    <CustomBuild Include="..\src\00_testBed\Shaders\Vulkan\base.vert">
+      <Filter>Shaders</Filter>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\src\00_testBed\Shaders\D3D12\basic.frag">
