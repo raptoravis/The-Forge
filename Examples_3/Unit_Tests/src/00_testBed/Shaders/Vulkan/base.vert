@@ -18,7 +18,7 @@ layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform uniformBlock {
 	uniform mat3 p3d_NormalMatrix;
 };
 
-struct p3d_LightSourceParameters
+struct LightSourceParameters_t
 { 
 	vec4 color  ; 
 	vec4 ambient  ; 
@@ -39,7 +39,7 @@ struct p3d_LightSourceParameters
   
 
 layout (std140, UPDATE_FREQ_PER_FRAME, binding=1) uniform lightSourceParameters {
- p3d_LightSourceParameters p3d_LightSource[NUMBER_OF_LIGHTS];
+ LightSourceParameters_t p3d_LightSource[NUMBER_OF_LIGHTS];
 };
 
 layout(location = 0) in vec4 p3d_Vertex;

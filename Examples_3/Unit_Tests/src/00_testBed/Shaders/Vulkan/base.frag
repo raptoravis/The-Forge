@@ -14,7 +14,7 @@
 #define MAX_SHININESS     127.75
 #define MAX_FRESNEL_POWER   5.0
 
-layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform uniformBlock {
+layout (std140, UPDATE_FREQ_NONE, binding=0) uniform uniformBlock {
 	uniform float osg_FrameTime;
 
 	uniform vec2 pi;
@@ -44,7 +44,7 @@ struct material_t
   float shininess;
 };
 
-layout (std140, UPDATE_FREQ_PER_FRAME, binding=0) uniform materialBlock {
+layout (std140, UPDATE_FREQ_NONE, binding=0) uniform materialBlock {
 	material_t p3d_Material;
 };
 
