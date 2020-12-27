@@ -41,6 +41,8 @@
     <None Include="..\src\00_testBed\Shaders\D3D12\watermark.vert" />
     <None Include="..\src\00_testBed\Shaders\D3D12\zPass.vert" />
     <None Include="..\src\00_testBed\Shaders\D3D12\zPassFloor.vert" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\base.frag" />
+    <None Include="..\src\00_testBed\Shaders\Vulkan\base.vert" />
     <None Include="..\src\00_testBed\Shaders\Vulkan\basic.frag" />
     <None Include="..\src\00_testBed\Shaders\Vulkan\basic.vert" />
     <None Include="..\src\00_testBed\Shaders\Vulkan\basicMOBILE.frag" />
