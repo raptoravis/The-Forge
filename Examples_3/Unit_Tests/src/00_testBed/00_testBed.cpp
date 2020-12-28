@@ -66,7 +66,7 @@ static const char* pModelNames[]				=
 	"matBall.gltf"
 };
 static const uint32_t gModelValues[]			= { 0, 1, 2, 3, 4, 5 };
-static uint32_t mModelSelected					= 0;
+static uint32_t mModelSelected					= 3;
 static const uint32_t mModelCount				= 6;
 
 // Model Quantization Settings
@@ -1221,6 +1221,8 @@ public:
 				}
 				addSemaphore(pRenderer, &pImageAcquiredSemaphore);
 
+				ResourceLoaderDesc resourceLoaderDesc = gDefaultResourceLoaderDesc;
+				resourceLoaderDesc.mSingleThreaded = true;
 				initResourceLoaderInterface(pRenderer);
 
 				if (!gAppUI.Init(pRenderer))
@@ -1733,6 +1735,9 @@ public:
 
 		drawShadowMap(cmd);
 
+		pRenderTarget = pForwardRT;
+
+		if (1)
 		{
 			LoadActionsDesc loadActions = {};
 			loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
@@ -1745,8 +1750,6 @@ public:
 			loadActions.mClearDepth.stencil = 0;
 
 			cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw Floor");
-
-			pRenderTarget = pForwardRT;
 
 			RenderTargetBarrier barriers[] =
 			{
