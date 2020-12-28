@@ -73,8 +73,9 @@ static const uint32_t mModelCount				= 6;
 int					gCurrentLod					= 0;
 int					gMaxLod						= 5;
 
-bool				bToggleFXAA					= true;
-bool				bVignetting					= true;
+bool				bDrawScene = true;
+bool				bToggleFXAA					= false;
+bool				bVignetting					= false;
 bool				bToggleVSync				= false;
 bool				bScreenShotMode				= false;
 
@@ -1390,6 +1391,7 @@ public:
 				guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.35f);
 				pGuiGraphics = gAppUI.AddGuiComponent("Graphics Options", &guiDesc);
 
+				pGuiGraphics->AddWidget(CheckboxWidget("Draw Scene", &bDrawScene));
 				pGuiGraphics->AddWidget(CheckboxWidget("Enable FXAA", &bToggleFXAA));
 				pGuiGraphics->AddWidget(CheckboxWidget("Enable Vignetting", &bVignetting));
 
@@ -1754,7 +1756,7 @@ public:
 			RenderTargetBarrier barriers[] =
 			{
 				{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
-			{ pShadowRT, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE }
+				{ pShadowRT, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE }
 			};
 			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
 
@@ -1784,7 +1786,7 @@ public:
 		}
 
 		//// draw scene
-
+		if (bDrawScene)
 		{
 			cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw Scene");
 
@@ -1821,15 +1823,15 @@ public:
 			cmdBindRenderTargets(cmd, 0, NULL, 0, NULL, NULL, NULL, -1, -1);
 
 			cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
+
+			pRenderTarget = pPostProcessRT;
+			RenderTargetBarrier barriers[] = {
+				{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+			{ pForwardRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
+			};
+
+			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
 		}
-
-		pRenderTarget = pPostProcessRT;
-		RenderTargetBarrier barriers[] = {
-			{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
-		{ pForwardRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
-		};
-
-		cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
 
 		if (bVignetting)
 		{
@@ -1857,12 +1859,15 @@ public:
 
 		pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		{
-			RenderTargetBarrier barriers[] =
+			if (bDrawScene)
 			{
-				{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
-			{ pPostProcessRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
-			};
-			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
+				RenderTargetBarrier barriers[] =
+				{
+					{ pRenderTarget, RESOURCE_STATE_PRESENT, RESOURCE_STATE_RENDER_TARGET },
+					{ pPostProcessRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
+				};
+				cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
+			}
 
 			LoadActionsDesc loadActions = {};
 			loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
