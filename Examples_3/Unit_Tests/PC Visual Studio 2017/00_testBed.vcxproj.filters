@@ -1,0 +1,94 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="..\src\00_testBed\00_testBed.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\..\Common_3\ThirdParty\OpenSource\cgltf\cgltf.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\base.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\base.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\basic.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\basic.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\basic.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\basic.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\basicMOBILE.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\floor.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\floor.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\floor.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\floor.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\floorMOBILE.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\FXAA.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\FXAA.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\Triangular.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\Triangular.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\vignette.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\vignette.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\watermark.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\watermark.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\watermark.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\watermark.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\zPass.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\zPass.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\Vulkan\zPassFloor.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="..\src\00_testBed\Shaders\D3D12\zPassFloor.vert">
+      <Filter>Shaders</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{2dd37bb4-7168-437f-b016-00267da1a768}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
