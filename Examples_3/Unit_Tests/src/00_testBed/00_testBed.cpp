@@ -1742,7 +1742,8 @@ public:
 
 		pRenderTarget = pForwardRT;
 
-		if (bDrawFloor || bDrawScene)
+		// clear the targets anyway
+		//if (bDrawFloor || bDrawScene)
 		{
 			cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Resource Barrior and RT");
 			RenderTargetBarrier barriers[] =
@@ -1783,7 +1784,6 @@ public:
 
 			cmdBindDescriptorSet(cmd, 0, pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_NONE]);
 			cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_PER_FRAME]);
-			cmdBindDescriptorSet(cmd, 0, gCurrentAsset.pMaterialSet);
 
 			const uint32_t stride = sizeof(float) * 5;
 			cmdBindVertexBuffer(cmd, 1, &pFloorVB, &stride, NULL);
@@ -1806,6 +1806,8 @@ public:
 
 			cmdBindDescriptorSet(cmd, 0, pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_NONE]);
 			cmdBindDescriptorSet(cmd, gFrameIndex, pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_PER_FRAME]);
+			cmdBindDescriptorSet(cmd, 0, gCurrentAsset.pMaterialSet);
+
 			cmdBindVertexBuffer(cmd, 1, &gCurrentAsset.pGeom->pVertexBuffers[0], &gCurrentAsset.pGeom->mVertexStrides[0], NULL);
 			cmdBindIndexBuffer(cmd, gCurrentAsset.pGeom->pIndexBuffer, gCurrentAsset.pGeom->mIndexType, 0);
 
