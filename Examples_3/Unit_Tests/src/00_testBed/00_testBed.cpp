@@ -50,13 +50,13 @@
 // GLOBAL DEFINTIONS
 //--------------------------------------------------------------------------------------------
 
-uint32_t			gFrameIndex					= 0;
+uint32_t			gFrameIndex = 0;
 
-const uint32_t		gImageCount					= 3;
-const uint32_t		gLightCount					= 3;
-const uint32_t		gTotalLightCount			= gLightCount + 1;
+const uint32_t		gImageCount = 3;
+const uint32_t		gLightCount = 3;
+const uint32_t		gTotalLightCount = gLightCount + 1;
 
-static const char* pModelNames[]				=
+static const char* pModelNames[] =
 {
 	"Lantern.gltf",
 	"FlightHelmet.gltf",
@@ -65,19 +65,20 @@ static const char* pModelNames[]				=
 	"lion.gltf",
 	"matBall.gltf"
 };
-static const uint32_t gModelValues[]			= { 0, 1, 2, 3, 4, 5 };
-static uint32_t mModelSelected					= 3;
-static const uint32_t mModelCount				= 6;
+static const uint32_t gModelValues[] = { 0, 1, 2, 3, 4, 5 };
+static uint32_t mModelSelected = 3;
+static const uint32_t mModelCount = 6;
 
 // Model Quantization Settings
-int					gCurrentLod					= 0;
-int					gMaxLod						= 5;
+int					gCurrentLod = 0;
+int					gMaxLod = 5;
 
+bool				bDrawFloor = true;
 bool				bDrawScene = true;
-bool				bToggleFXAA					= false;
-bool				bVignetting					= false;
-bool				bToggleVSync				= false;
-bool				bScreenShotMode				= false;
+bool				bToggleFXAA = false;
+bool				bVignetting = false;
+bool				bToggleVSync = false;
+bool				bScreenShotMode = false;
 
 ProfileToken   gGpuProfileToken;
 Texture*			pTextureBlack = NULL;
@@ -506,44 +507,44 @@ struct FXAAINFO
 // RENDERING PIPELINE DATA
 //--------------------------------------------------------------------------------------------
 
-Renderer*			pRenderer			= NULL;
+Renderer*			pRenderer = NULL;
 
-Queue*				pGraphicsQueue		= NULL;
+Queue*				pGraphicsQueue = NULL;
 
 CmdPool*			pCmdPools[gImageCount];
 Cmd*				pCmds[gImageCount];
 
-SwapChain*			pSwapChain			= NULL;
+SwapChain*			pSwapChain = NULL;
 
-RenderTarget*		pForwardRT			= NULL;
-RenderTarget*		pPostProcessRT		= NULL;
-RenderTarget*		pDepthBuffer		= NULL;
-RenderTarget*		pShadowRT			= NULL;
+RenderTarget*		pForwardRT = NULL;
+RenderTarget*		pPostProcessRT = NULL;
+RenderTarget*		pDepthBuffer = NULL;
+RenderTarget*		pShadowRT = NULL;
 
-Fence*				pRenderCompleteFences[gImageCount]	= { NULL };
+Fence*				pRenderCompleteFences[gImageCount] = { NULL };
 
-Semaphore*			pImageAcquiredSemaphore				= NULL;
+Semaphore*			pImageAcquiredSemaphore = NULL;
 Semaphore*			pRenderCompleteSemaphores[gImageCount] = { NULL };
 
-Shader*				pShaderZPass						= NULL;
-Shader*				pShaderZPass_NonOptimized			= NULL;
-Shader*				pMeshOptDemoShader					= NULL;
-Shader*				pFloorShader						= NULL;
-Shader*				pVignetteShader						= NULL;
-Shader*				pFXAAShader							= NULL;
-Shader*				pWaterMarkShader					= NULL;
+Shader*				pShaderZPass = NULL;
+Shader*				pShaderZPass_NonOptimized = NULL;
+Shader*				pMeshOptDemoShader = NULL;
+Shader*				pFloorShader = NULL;
+Shader*				pVignetteShader = NULL;
+Shader*				pFXAAShader = NULL;
+Shader*				pWaterMarkShader = NULL;
 
-Pipeline*			pPipelineShadowPass					= NULL;
-Pipeline*			pPipelineShadowPass_NonOPtimized	= NULL;
-Pipeline*			pMeshOptDemoPipeline				= NULL;
-Pipeline*			pFloorPipeline						= NULL;
-Pipeline*			pVignettePipeline					= NULL;
-Pipeline*			pFXAAPipeline						= NULL;
-Pipeline*			pWaterMarkPipeline					= NULL;
+Pipeline*			pPipelineShadowPass = NULL;
+Pipeline*			pPipelineShadowPass_NonOPtimized = NULL;
+Pipeline*			pMeshOptDemoPipeline = NULL;
+Pipeline*			pFloorPipeline = NULL;
+Pipeline*			pVignettePipeline = NULL;
+Pipeline*			pFXAAPipeline = NULL;
+Pipeline*			pWaterMarkPipeline = NULL;
 
-RootSignature*		pRootSignatureShadow				= NULL;
-RootSignature*		pRootSignatureShaded				= NULL;
-RootSignature*		pRootSignaturePostEffects			= NULL;
+RootSignature*		pRootSignatureShadow = NULL;
+RootSignature*		pRootSignatureShaded = NULL;
+RootSignature*		pRootSignaturePostEffects = NULL;
 
 DescriptorSet*      pDescriptorSetVignette;
 DescriptorSet*      pDescriptorSetFXAA;
@@ -551,19 +552,19 @@ DescriptorSet*      pDescriptorSetWatermark;
 DescriptorSet*      pDescriptorSetsShadow[DESCRIPTOR_UPDATE_FREQ_COUNT];
 DescriptorSet*      pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_COUNT];
 
-VirtualJoystickUI   gVirtualJoystick                    = {};
+VirtualJoystickUI   gVirtualJoystick = {};
 
-Buffer*				pUniformBuffer[gImageCount]			= { NULL };
-Buffer*				pShadowUniformBuffer[gImageCount]	= { NULL };
-Buffer*				pFloorUniformBuffer[gImageCount]	= { NULL };
+Buffer*				pUniformBuffer[gImageCount] = { NULL };
+Buffer*				pShadowUniformBuffer[gImageCount] = { NULL };
+Buffer*				pFloorUniformBuffer[gImageCount] = { NULL };
 
-Buffer*				TriangularVB						= NULL;
-Buffer*				pFloorVB							= NULL;
-Buffer*				pFloorIB							= NULL;
-Buffer*				WaterMarkVB							= NULL;
+Buffer*				TriangularVB = NULL;
+Buffer*				pFloorVB = NULL;
+Buffer*				pFloorIB = NULL;
+Buffer*				WaterMarkVB = NULL;
 
-Sampler*			pDefaultSampler						= NULL;
-Sampler*			pBilinearClampSampler				= NULL;
+Sampler*			pDefaultSampler = NULL;
+Sampler*			pBilinearClampSampler = NULL;
 
 UniformBlock		gUniformData;
 UniformBlock_Floor	gFloorUniformBlock;
@@ -573,27 +574,28 @@ UniformBlock_Shadow gShadowUniformData;
 // THE FORGE OBJECTS
 //--------------------------------------------------------------------------------------------
 
-ICameraController*	pCameraController					= NULL;
-ICameraController*	pLightView							= NULL;
+ICameraController*	pCameraController = NULL;
+ICameraController*	pLightView = NULL;
 
 GuiComponent*		pGuiWindow;
 GuiComponent*		pGuiGraphics;
 
-IWidget*			pSelectLodWidget					= NULL;
+IWidget*			pSelectLodWidget = NULL;
 
 UIApp				gAppUI;
 
 #if defined(__ANDROID__) || defined(__linux__) || defined(ORBIS) || defined(PROSPERO)
-uint32_t			modelToLoadIndex					= 0;
-uint32_t			guiModelToLoadIndex					= 0;
+uint32_t			modelToLoadIndex = 0;
+uint32_t			guiModelToLoadIndex = 0;
 #endif
 
-const char*		gMissingTextureString				= "MissingTexture";
+const char*		gMissingTextureString = "MissingTexture";
 
 const char*					    gModelFile;
 uint32_t						gPreviousLoadedModel = mModelSelected;
 
-const uint			gBackroundColor = { 0xb2b2b2ff };
+//const uint			gBackroundColor = { 0xb2b2b2ff };
+const uint			gBackroundColor = { 0x828282ff };
 static uint			gLightColor[gTotalLightCount] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffff66 };
 static float		gLightColorIntensity[gTotalLightCount] = { 2.0f, 0.2f, 0.2f, 0.25f };
 static float2		gLightDirection = { -122.0f, 222.0f };
@@ -819,13 +821,13 @@ public:
 	bool Init()
 	{
 		// FILE PATHS
-		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES,  "Shaders");
-		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG,   RD_SHADER_BINARIES, "CompiledShaders");
-		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG,      "GPUCfg");
-		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES,        "Textures");
-		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS,           "Fonts");
-		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_MESHES,          "Meshes");
-		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SCRIPTS,		   "Scripts");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SHADER_SOURCES, "Shaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_DEBUG, RD_SHADER_BINARIES, "CompiledShaders");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_GPU_CONFIG, "GPUCfg");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_TEXTURES, "Textures");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_FONTS, "Fonts");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_MESHES, "Meshes");
+		fsSetPathForResourceDir(pSystemFileIO, RM_CONTENT, RD_SCRIPTS, "Scripts");
 
 		CameraMotionParameters cmp{ 1.0f, 120.0f, 40.0f };
 		vec3                   camPos{ 3.0f, 2.5f, -4.0f };
@@ -1191,7 +1193,7 @@ public:
 	{
 		if (!mModelReload)
 		{
-			if(mSettings.mResetGraphics || !pRenderer)
+			if (mSettings.mResetGraphics || !pRenderer)
 			{
 				// window and renderer setup
 				RendererDesc settings = { 0 };
@@ -1224,7 +1226,7 @@ public:
 
 				ResourceLoaderDesc resourceLoaderDesc = gDefaultResourceLoaderDesc;
 				resourceLoaderDesc.mSingleThreaded = true;
-				initResourceLoaderInterface(pRenderer);
+				initResourceLoaderInterface(pRenderer, &resourceLoaderDesc);
 
 				if (!gAppUI.Init(pRenderer))
 					return false;
@@ -1391,6 +1393,7 @@ public:
 				guiDesc.mStartPosition = vec2(mSettings.mWidth * 0.01f, mSettings.mHeight * 0.35f);
 				pGuiGraphics = gAppUI.AddGuiComponent("Graphics Options", &guiDesc);
 
+				pGuiGraphics->AddWidget(CheckboxWidget("Draw Floor", &bDrawFloor));
 				pGuiGraphics->AddWidget(CheckboxWidget("Draw Scene", &bDrawScene));
 				pGuiGraphics->AddWidget(CheckboxWidget("Enable FXAA", &bToggleFXAA));
 				pGuiGraphics->AddWidget(CheckboxWidget("Enable Vignetting", &bVignetting));
@@ -1542,7 +1545,7 @@ public:
 		removeRenderTarget(pRenderer, pDepthBuffer);
 		removeRenderTarget(pRenderer, pShadowRT);
 
-		if (mSettings.mResetGraphics || mSettings.mQuit) 
+		if (mSettings.mResetGraphics || mSettings.mQuit)
 		{
 			exitProfilerUI();
 
@@ -1684,7 +1687,7 @@ public:
 		//			gCurrentLod = 0;
 		//		else
 		//			gCurrentLod = min((int)log2(pow((float)distanceFromCamera, 0.6f) + 1.0f), gMaxLod);
-	}	
+	}
 
 	static void LoadLOD()
 	{
@@ -1739,8 +1742,16 @@ public:
 
 		pRenderTarget = pForwardRT;
 
-		if (1)
+		if (bDrawFloor || bDrawScene)
 		{
+			cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Resource Barrior and RT");
+			RenderTargetBarrier barriers[] =
+			{
+				{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
+				{ pShadowRT, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE }
+			};
+			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
+
 			LoadActionsDesc loadActions = {};
 			loadActions.mLoadActionsColor[0] = LOAD_ACTION_CLEAR;
 			loadActions.mClearColorValues[0].r = bgColor.getX();
@@ -1751,18 +1762,16 @@ public:
 			loadActions.mClearDepth.depth = 0.0f;
 			loadActions.mClearDepth.stencil = 0;
 
-			cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw Floor");
-
-			RenderTargetBarrier barriers[] =
-			{
-				{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
-				{ pShadowRT, RESOURCE_STATE_DEPTH_WRITE, RESOURCE_STATE_SHADER_RESOURCE }
-			};
-			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
-
 			cmdBindRenderTargets(cmd, 1, &pRenderTarget, pDepthBuffer, &loadActions, NULL, NULL, -1, -1);
 			cmdSetViewport(cmd, 0.0f, 0.0f, (float)pRenderTarget->mWidth, (float)pRenderTarget->mHeight, 0.0f, 1.0f);
 			cmdSetScissor(cmd, 0, 0, pRenderTarget->mWidth, pRenderTarget->mHeight);
+
+			cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
+		}
+
+		if (bDrawFloor)
+		{
+			cmdBeginGpuTimestampQuery(cmd, gGpuProfileToken, "Draw Floor");
 
 			cmdBindPipeline(cmd, pFloorPipeline);
 
@@ -1820,14 +1829,17 @@ public:
 				pushConstants.nodeIndex += 1;
 			}
 
-			cmdBindRenderTargets(cmd, 0, NULL, 0, NULL, NULL, NULL, -1, -1);
-
 			cmdEndGpuTimestampQuery(cmd, gGpuProfileToken);
+		}
+
+		if (bDrawFloor || bDrawScene)
+		{
+			cmdBindRenderTargets(cmd, 0, NULL, 0, NULL, NULL, NULL, -1, -1);
 
 			pRenderTarget = pPostProcessRT;
 			RenderTargetBarrier barriers[] = {
 				{ pRenderTarget, RESOURCE_STATE_SHADER_RESOURCE, RESOURCE_STATE_RENDER_TARGET },
-			{ pForwardRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
+				{ pForwardRT, RESOURCE_STATE_RENDER_TARGET, RESOURCE_STATE_SHADER_RESOURCE }
 			};
 
 			cmdResourceBarrier(cmd, 0, NULL, 0, NULL, 2, barriers);
@@ -1859,7 +1871,6 @@ public:
 
 		pRenderTarget = pSwapChain->ppRenderTargets[swapchainImageIndex];
 		{
-			if (bDrawScene)
 			{
 				RenderTargetBarrier barriers[] =
 				{
