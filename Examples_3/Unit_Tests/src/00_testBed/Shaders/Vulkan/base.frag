@@ -44,7 +44,7 @@ struct material_t
   float shininess;
 };
 
-layout (std140, UPDATE_FREQ_NONE, binding=0) uniform materialBlock {
+layout (std140, UPDATE_FREQ_PER_DRAW, binding=0) uniform materialBlock {
 	material_t p3d_Material;
 };
 
@@ -74,17 +74,17 @@ struct LightSourceParameters_t
 };
   
 
-layout (std140, UPDATE_FREQ_PER_FRAME, binding=1) uniform lightSourceParameters {
+layout (std140, UPDATE_FREQ_PER_DRAW, binding=1) uniform lightSourceParameters {
 	LightSourceParameters_t p3d_LightSource[NUMBER_OF_LIGHTS];
 };
 
-layout (UPDATE_FREQ_PER_FRAME, binding=2) uniform sampler2DShadow shadowMap[NUMBER_OF_LIGHTS]  ;   
+layout (UPDATE_FREQ_PER_DRAW, binding=2) uniform sampler2DShadow shadowMap[NUMBER_OF_LIGHTS]  ;   
 
-layout (UPDATE_FREQ_PER_FRAME, binding=3) uniform sampler2D p3d_Texture0;
-layout (UPDATE_FREQ_PER_FRAME, binding=4) uniform sampler2D p3d_Texture1;
-layout (UPDATE_FREQ_PER_FRAME, binding=5) uniform sampler2D p3d_Texture2;
-layout (UPDATE_FREQ_PER_FRAME, binding=6) uniform sampler2D flowTexture;
-layout (UPDATE_FREQ_PER_FRAME, binding=7) uniform sampler2D ssaoBlurTexture;
+layout (UPDATE_FREQ_PER_DRAW, binding=3) uniform sampler2D p3d_Texture0;
+layout (UPDATE_FREQ_PER_DRAW, binding=4) uniform sampler2D p3d_Texture1;
+layout (UPDATE_FREQ_PER_DRAW, binding=5) uniform sampler2D p3d_Texture2;
+layout (UPDATE_FREQ_PER_DRAW, binding=6) uniform sampler2D flowTexture;
+layout (UPDATE_FREQ_PER_DRAW, binding=7) uniform sampler2D ssaoBlurTexture;
 
 layout(location=0) in vec4 vertexColor;
 
