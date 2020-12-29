@@ -526,6 +526,7 @@ Fence*				pRenderCompleteFences[gImageCount] = { NULL };
 Semaphore*			pImageAcquiredSemaphore = NULL;
 Semaphore*			pRenderCompleteSemaphores[gImageCount] = { NULL };
 
+Shader*				pShaderBase = NULL;
 Shader*				pShaderZPass = NULL;
 Shader*				pShaderZPass_NonOptimized = NULL;
 Shader*				pMeshOptDemoShader = NULL;
@@ -541,16 +542,19 @@ Pipeline*			pFloorPipeline = NULL;
 Pipeline*			pVignettePipeline = NULL;
 Pipeline*			pFXAAPipeline = NULL;
 Pipeline*			pWaterMarkPipeline = NULL;
+Pipeline*			pBasePipeline = NULL;
 
 RootSignature*		pRootSignatureShadow = NULL;
 RootSignature*		pRootSignatureShaded = NULL;
 RootSignature*		pRootSignaturePostEffects = NULL;
+RootSignature*		pRootSignatureBase = NULL;
 
 DescriptorSet*      pDescriptorSetVignette;
 DescriptorSet*      pDescriptorSetFXAA;
 DescriptorSet*      pDescriptorSetWatermark;
 DescriptorSet*      pDescriptorSetsShadow[DESCRIPTOR_UPDATE_FREQ_COUNT];
 DescriptorSet*      pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_COUNT];
+DescriptorSet*      pDescriptorSetsBase[DESCRIPTOR_UPDATE_FREQ_COUNT];
 
 VirtualJoystickUI   gVirtualJoystick = {};
 
@@ -625,6 +629,13 @@ public:
 	{
 		// shader
 
+		ShaderLoadDesc BaseShader = {};
+
+		BaseShader.mStages[0] = { "base.vert", NULL, 0 };
+		BaseShader.mStages[1] = { "base.frag", NULL, 0 };
+
+		addShader(pRenderer, &BaseShader, &pShaderBase);
+
 		ShaderLoadDesc FloorShader = {};
 
 		FloorShader.mStages[0] = { "floor.vert", NULL, 0 };
@@ -698,6 +709,12 @@ public:
 		rootDesc.ppShaders = postShaders;
 
 		addRootSignature(pRenderer, &rootDesc, &pRootSignaturePostEffects);
+
+		Shader* baseShaders[] = { pShaderBase };
+		rootDesc.mShaderCount = 1;
+		rootDesc.ppShaders = baseShaders;
+
+		addRootSignature(pRenderer, &rootDesc, &pRootSignatureBase);
 
 		if (!AddDescriptorSets())
 			return false;
@@ -921,6 +938,14 @@ public:
 		setDesc = { pRootSignatureShaded, DESCRIPTOR_UPDATE_FREQ_PER_FRAME, gImageCount };
 		addDescriptorSet(pRenderer, &setDesc, &pDescriptorSetsShaded[DESCRIPTOR_UPDATE_FREQ_PER_FRAME]);
 
+		if (pRootSignatureBase)
+		{
+			setDesc = { pRootSignatureBase, DESCRIPTOR_UPDATE_FREQ_NONE, 1 };
+			addDescriptorSet(pRenderer, &setDesc, &pDescriptorSetsBase[DESCRIPTOR_UPDATE_FREQ_NONE]);
+			setDesc = { pRootSignatureShaded, DESCRIPTOR_UPDATE_FREQ_PER_FRAME, gImageCount };
+			addDescriptorSet(pRenderer, &setDesc, &pDescriptorSetsBase[DESCRIPTOR_UPDATE_FREQ_PER_FRAME]);
+		}
+
 		return true;
 	}
 
@@ -1001,10 +1026,15 @@ public:
 		removeShader(pRenderer, pMeshOptDemoShader);
 		removeShader(pRenderer, pFXAAShader);
 		removeShader(pRenderer, pWaterMarkShader);
+		removeShader(pRenderer, pShaderBase);
 
 		removeRootSignature(pRenderer, pRootSignatureShadow);
 		removeRootSignature(pRenderer, pRootSignatureShaded);
 		removeRootSignature(pRenderer, pRootSignaturePostEffects);
+		if (pRootSignatureBase)
+		{
+			removeRootSignature(pRenderer, pRootSignatureBase);
+		}
 	}
 
 	static void RemoveModelDependentResources()
@@ -1517,6 +1547,10 @@ public:
 		removePipeline(pRenderer, pMeshOptDemoPipeline);
 		removePipeline(pRenderer, pFXAAPipeline);
 		removePipeline(pRenderer, pWaterMarkPipeline);
+		if (pBasePipeline)
+		{
+			removePipeline(pRenderer, pBasePipeline);
+		}
 	}
 
 	void Unload()
